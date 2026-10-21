@@ -33,24 +33,30 @@ export function shortenPath(absolute: string, cwd: string, max = 56): string {
 }
 
 export function pmLabel(pm: PMInfo): string {
-  if (pm.family === 'unknown') return pm.multiple ? '[multiple]' : '—'
-  const base = pm.family
-  return pm.multiple ? colors.yellow(`${base} [multiple]`) : base
+  if (pm.family === 'unknown') {
+    const tag = pm.vp ? colors.magenta(' [vp]') : ''
+    return (pm.multiple ? colors.yellow('[multiple]') : '—') + tag
+  }
+  const vpTag = pm.vp ? colors.magenta(' [vp]') : ''
+  const multiTag = pm.multiple ? colors.yellow(' [multiple]') : ''
+  return pm.family + vpTag + multiTag
 }
 
 export interface RenderScanOptions {
   cwd: string
   json: boolean
   sizeMode: 'each' | 'total'
+  /** --expand: full absolute paths instead of shortened display paths. */
+  expand?: boolean
 }
 
 export function renderScanResult(result: ScanCommandResult, options: RenderScanOptions): string {
   if (options.json) return renderScanJson(result)
   if (options.sizeMode === 'total' || isSilent()) return renderScanTotals(result)
-  return renderScanTable(result, options.cwd)
+  return renderScanTable(result, options)
 }
 
-function renderScanTable(result: ScanCommandResult, cwd: string): string {
+function renderScanTable(result: ScanCommandResult, options: RenderScanOptions): string {
   const table = new Table({
     head: [
       colors.dim('Path'),
@@ -62,14 +68,26 @@ function renderScanTable(result: ScanCommandResult, cwd: string): string {
     style: { head: [], border: ['gray'] },
   })
 
-  for (const entry of result.entries) {
+  const pushRow = (entry: ScanEntry, nested: boolean): void => {
+    const display = options.expand === true ? entry.path : entry.displayPath
+    const label = nested
+      ? `${colors.dim('└─')}${colors.dim(' nested ')}${display}`
+      : colors.bold(display)
     table.push([
-      colors.bold(entry.displayPath),
+      label,
       formatBytes(entry.size),
       entry.packageCount > 0 ? String(entry.packageCount) : '0',
       pmLabel(entry.pm),
       formatAge(entry.mtimeMs),
     ])
+  }
+
+  for (const entry of result.entries) {
+    if (entry.nested) continue
+    pushRow(entry, false)
+    for (const child of result.entries) {
+      if (child.nested && child.ownerPath === entry.path) pushRow(child, true)
+    }
   }
 
   const lines = [table.toString(), renderScanTotals(result)]
@@ -83,7 +101,9 @@ function renderScanTable(result: ScanCommandResult, cwd: string): string {
 
 export function renderScanTotals(result: ScanCommandResult): string {
   const { totals } = result
-  return `💾 Total: ${formatBytes(totals.size)} across ${totals.folders} folder(s), ${totals.packages} packages`
+  const nestedCount = result.entries.filter((entry) => entry.nested).length
+  const nestedNote = nestedCount > 0 ? colors.dim(` (+${nestedCount} nested, not counted)`) : ''
+  return `💾 Total: ${formatBytes(totals.size)} across ${totals.folders} folder(s), ${totals.packages} packages${nestedNote}`
 }
 
 export function renderScanJson(result: ScanCommandResult): string {
@@ -101,7 +121,10 @@ export function renderScanJson(result: ScanCommandResult): string {
       pm: entry.pm.family,
       pmSources: entry.pm.sources,
       pmMultiple: entry.pm.multiple,
+      pmVp: entry.pm.vp,
       pmProjectRoot: entry.pm.projectRoot,
+      nested: entry.nested === true,
+      ownerPath: entry.ownerPath ?? entry.path,
       modifiedAt: entry.mtimeMs == null ? null : new Date(entry.mtimeMs).toISOString(),
     })),
   }

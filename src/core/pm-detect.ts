@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { PMFamily, PMInfo } from './result.ts'
+import { manifestHasVitePlus, readPackageJson, type LoosePackageJson } from './packages.ts'
 
 /** Detection order mirrors Vite+ (vp) — wrapper whose own docs define the canonical order. */
 const LOCKFILE_PRIORITY: Array<{ family: Exclude<PMFamily, 'unknown'>; files: string[] }> = [
@@ -9,17 +10,6 @@ const LOCKFILE_PRIORITY: Array<{ family: Exclude<PMFamily, 'unknown'>; files: st
   { family: 'npm', files: ['package-lock.json'] },
   { family: 'bun', files: ['bun.lock', 'bun.lockb'] },
 ]
-
-interface LoosePackageJson {
-  packageManager?: string
-  devEngines?: {
-    packageManager?:
-      | { name?: string }
-      | Array<{ name?: string }>
-      | string
-      | Array<string>
-  }
-}
 
 type PmDetector = (nodeModulesPath: string) => Promise<PMInfo>
 
@@ -30,23 +20,36 @@ export function createPmDetector(): PmDetector {
     const start = path.dirname(nodeModulesPath)
     const hit = cache.get(start)
     if (hit) return hit
-    const info = await detectUncached(start)
+    const info = await decorateVp(await detectUncached(start))
     cache.set(start, info)
     return info
   }
 }
 
+/** vp is a wrapper, not a package manager: tag when the workspace declares vite-plus. */
+async function decorateVp(info: PMInfo): Promise<PMInfo> {
+  const pkg = await readPackageJson(info.projectRoot)
+  if (!manifestHasVitePlus(pkg)) return info
+  return { ...info, vp: true, sources: [...info.sources, 'vite-plus dependency'] }
+}
+
 async function detectUncached(startDir: string): Promise<PMInfo> {
   let current = startDir
   for (;;) {
-    const pkg = await readPackageJsonSafe(current)
+    const pkg = await readPackageJson(current)
     if (pkg) {
       const field = pmFromField(pkg.packageManager)
-      if (field) return { family: field, sources: ['packageManager'], multiple: false, projectRoot: current }
+      if (field) return { family: field, sources: ['packageManager'], multiple: false, projectRoot: current, vp: false }
 
       const devEngines = pmFromDevEngines(pkg)
       if (devEngines) {
-        return { family: devEngines, sources: ['devEngines.packageManager'], multiple: false, projectRoot: current }
+        return {
+          family: devEngines,
+          sources: ['devEngines.packageManager'],
+          multiple: false,
+          projectRoot: current,
+          vp: false,
+        }
       }
     }
 
@@ -62,6 +65,7 @@ async function detectUncached(startDir: string): Promise<PMInfo> {
     sources: [],
     multiple: false,
     projectRoot: startDir,
+    vp: false,
   }
 }
 
@@ -87,16 +91,7 @@ async function detectLockfilesAt(dir: string): Promise<PMInfo | null> {
     sources: foundFiles,
     multiple: foundFamilies.size > 1,
     projectRoot: dir,
-  }
-}
-
-async function readPackageJsonSafe(dir: string): Promise<LoosePackageJson | null> {
-  try {
-    const raw = await fs.readFile(path.join(dir, 'package.json'), 'utf8')
-    const parsed = JSON.parse(raw) as LoosePackageJson
-    return typeof parsed === 'object' && parsed !== null ? parsed : null
-  } catch {
-    return null
+    vp: false,
   }
 }
 

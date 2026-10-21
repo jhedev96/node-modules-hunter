@@ -16,21 +16,19 @@ cli.option('--delete [mode]', 'Delete found folders: hard | soft | trash (soft =
 cli.option('--dry-run', 'Preview what would be deleted — nothing is touched')
 cli.option('-y, --yes', 'Answer yes to every prompt')
 cli.option('-f, --force', 'Skip all confirmations (implies --yes)')
-cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N is v0.2")
+cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N lands later")
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output')
 cli.option('--verbose', 'Debug chatter on stderr')
 cli.option('--no-color', 'Disable ANSI colors')
+cli.option('-r, --recursive', 'Also look INSIDE found node_modules (nested audit; totals stay top-level only)')
+cli.option('--pm [family]', "Filter by detected PM: npm|pnpm|yarn|bun|vp — no value lists what was detected")
+cli.option('--exclude <globs>', 'Exclude paths from results (comma list of globs, e.g. **/e2e/**)')
+cli.option('--keep <pkgs>', 'Refuse to delete node_modules of these projects (comma list, glob ok)')
+cli.option('--depth <n>', 'Max scan depth in levels below the target')
+cli.option('--expand', 'Full absolute paths + extra detail in output')
 
-interface NormalizedFlags {
-  dirTargets: string[]
-  deleteGiven: boolean
-  deleteMode: DeleteMode | null
-  dryRun: boolean
-  assumeYes: boolean
-  json: boolean
-  sizeMode: 'each' | 'total'
-}
+const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
 const COMMAND_WORDS = new Set(['scan', 'clean', 'help', 'version'])
 
@@ -52,6 +50,20 @@ function normalizeDelete(value: unknown): { given: boolean; mode: DeleteMode | n
     if (value === 'trash' || value === 'soft') return { given: true, mode: 'trash' }
     return 'invalid'
   }
+  return 'invalid'
+}
+
+function normalizePm(value: unknown): { given: boolean; family: string | null } | 'invalid' {
+  if (value === undefined) return { given: false, family: null }
+  if (value === true) return { given: true, family: null } // bare --pm = list what was detected
+  if (typeof value === 'string' && PM_FAMILIES.has(value)) return { given: true, family: value }
+  return 'invalid'
+}
+
+function normalizeDepth(value: unknown): number | null | 'invalid' {
+  if (value === undefined || value === false) return null
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number.parseInt(value, 10)
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value
   return 'invalid'
 }
 
@@ -85,7 +97,7 @@ async function main(): Promise<number> {
     if (flags.size === 'total') sizeMode = 'total'
     else if (flags.size === 'each') sizeMode = 'each'
     else if (/^\d+$/.test(flags.size)) {
-      warn('--size <n> (top-N list) comes with v0.2 — listing every folder for now')
+      warn('--size <n> (top-N list) lands in a later version — listing every folder for now')
     } else {
       errorLog(`invalid --size: ${flags.size} (expected 'total' or 'each')`)
       return 1
@@ -98,6 +110,23 @@ async function main(): Promise<number> {
     return 1
   }
 
+  const pm = normalizePm(flags.pm)
+  if (pm === 'invalid') {
+    errorLog(`invalid --pm: ${String(flags.pm)} (expected npm | pnpm | yarn | bun | vp)`)
+    return 1
+  }
+
+  const depth = normalizeDepth(flags.depth)
+  if (depth === 'invalid') {
+    errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
+    return 1
+  }
+
+  const recursive = flags.recursive === true
+  const expand = flags.expand === true
+  const excludes = splitTargets(flags.exclude as string | string[] | undefined)
+  const keep = splitTargets(flags.keep as string | string[] | undefined)
+
   const cwd = process.cwd()
   const json = flags.json === true
   const dryRun = flags.dryRun === true
@@ -108,28 +137,72 @@ async function main(): Promise<number> {
   const dirTargets = splitTargets(flags.dir as string | string[] | undefined)
   const targets = [...rest, ...dirTargets]
 
+  // `--pm` without a value is read-only reporting; a delete op needs an actual family to filter by.
+  if (pm.given && pm.family === null && (subcommand === 'clean' || deleted.given)) {
+    errorLog('--pm without a value only lists detected PMs — give a family (npm|pnpm|yarn|bun|vp) to filter a delete op')
+    return 1
+  }
+
+  const scanOptions = {
+    targets,
+    cwd,
+    json,
+    sizeMode,
+    maxDepth: depth ?? undefined,
+    recursive,
+    excludes: excludes.length > 0 ? excludes : undefined,
+    keep: keep.length > 0 ? keep : undefined,
+    pmFilter: pm.family !== null ? [pm.family] : undefined,
+    listPm: pm.given && pm.family === null,
+    expand,
+  }
+
   if (subcommand === 'version') {
     console.log(`${toolVersion()} (node ${process.version}, ${process.platform})`)
     return 0
   }
 
   if (subcommand === 'scan') {
-    const outcome = await runScan({ targets, cwd, json, sizeMode })
+    const outcome = await runScan(scanOptions)
     return outcome.code
   }
 
   if (subcommand === 'clean') {
-    return runClean({ targets, cwd, mode: deleted.mode, dryRun, assumeYes, json })
+    return runClean({
+      targets,
+      cwd,
+      mode: deleted.mode,
+      dryRun,
+      assumeYes,
+      json,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      maxDepth: depth ?? undefined,
+    })
   }
 
   if (deleted.given) {
     // `nmh --dir=… --delete=hard` with NO command is the one-liner (PRD §1) — targets default to cwd.
-    return runDelete({ targets, cwd, mode: deleted.mode, dryRun, assumeYes, json })
+    return runDelete({
+      targets,
+      cwd,
+      mode: deleted.mode,
+      dryRun,
+      assumeYes,
+      json,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      maxDepth: depth ?? undefined,
+    })
   }
 
   if (positionals.length > 0 || dirTargets.length > 0) {
     // `nmh <path>` positional shortcut = scan (PRD §5.3)
-    const outcome = await runScan({ targets, cwd, json, sizeMode })
+    const outcome = await runScan(scanOptions)
     return outcome.code
   }
 

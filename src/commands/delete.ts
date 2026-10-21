@@ -20,6 +20,14 @@ export interface DeleteFlowRequest {
   assumeYes: boolean
   json: boolean
   maxDepth?: number
+  /** -r: nested node_modules inside entries become individual victims too. */
+  recursive?: boolean
+  /** --exclude globs. */
+  excludes?: string[]
+  /** --keep: never delete node_modules of these projects. */
+  keep?: string[]
+  /** --pm filter: families and/or 'vp'. */
+  pmFilter?: string[]
   /**
    * abort (default): any guarded target aborts the whole run (exit 3).
    * filter: garbage-collector semantics (clean/wizard) — skip guarded, warn, continue.
@@ -75,6 +83,10 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
     targets: request.targets,
     cwd: request.cwd,
     maxDepth: request.maxDepth,
+    recursive: request.recursive,
+    excludes: request.excludes,
+    keep: request.keep,
+    pmFilter: request.pmFilter,
   })
 
   // Unresolvable user targets are an explicit guard case (PRD §6.3 symlink loops first-class).

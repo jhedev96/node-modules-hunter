@@ -9,6 +9,11 @@ export interface CleanRequest {
   dryRun: boolean
   assumeYes: boolean
   json: boolean
+  recursive?: boolean
+  excludes?: string[]
+  keep?: string[]
+  pmFilter?: string[]
+  maxDepth?: number
 }
 
 /**
@@ -23,6 +28,11 @@ export async function runClean(request: CleanRequest): Promise<number> {
     dryRun: request.dryRun,
     assumeYes: request.assumeYes,
     json: request.json,
+    recursive: request.recursive,
+    excludes: request.excludes,
+    keep: request.keep,
+    pmFilter: request.pmFilter,
+    maxDepth: request.maxDepth,
     blockedMode: 'filter',
   })
 }

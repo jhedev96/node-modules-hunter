@@ -8,6 +8,8 @@ export interface PMInfo {
   multiple: boolean
   /** Nearest enclosing project/workspace root used for detection. */
   projectRoot: string
+  /** True when the workspace declares the `vite-plus` wrapper (Vite+ / `vp`). */
+  vp: boolean
 }
 
 export interface ScanEntry {
@@ -21,6 +23,10 @@ export interface ScanEntry {
   packageCount: number
   pm: PMInfo
   mtimeMs: number | null
+  /** True when discovered via -r INSIDE another entry; shown flagged, excluded from totals. */
+  nested?: boolean
+  /** Top-level owner entry (== path for top entries). */
+  ownerPath?: string
 }
 
 export interface ScanTotals {

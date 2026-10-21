@@ -139,3 +139,24 @@ export async function monorepoFixture(label = 'mono'): Promise<MonorepoFixture> 
     paths: { web, webEntry, api, apiEntry, mobile, mobileEntry, bun, bunEntry, outside, loop, loopEntry: path.join(loop, 'node_modules') },
   }
 }
+
+export interface VpFixture {
+  root: string
+  project: string
+  entry: string
+}
+
+/** pnpm project that declares the vite-plus wrapper (drives the v0.2 `[vp]` tag). */
+export async function vpFixture(label = 'vp'): Promise<VpFixture> {
+  const root = await tmpRoot(label)
+  const project = path.join(root, 'app')
+  const entry = path.join(project, 'node_modules')
+  await fs.mkdir(path.join(entry, 'vite'), { recursive: true })
+  await fs.writeFile(
+    path.join(project, 'package.json'),
+    '{"name":"app","dependencies":{"vite-plus":"^0.1.0"},"devDependencies":{"vite":"^5.0.0"}}',
+  )
+  await fs.writeFile(path.join(project, 'pnpm-lock.yaml'), 'lockfileVersion: 6.0')
+  await fs.writeFile(path.join(entry, 'vite', 'package.json'), '{"name":"vite"}')
+  return { root, project, entry }
+}

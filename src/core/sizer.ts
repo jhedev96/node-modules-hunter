@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Dirent } from 'node:fs'
 import { createLimiter } from '../utils/limit.ts'
+import { listTopLevelPackages } from './packages.ts'
 import { isPermissionError } from './walker.ts'
 
 export interface EntryMeasure {
@@ -73,49 +74,9 @@ export async function measureEntry(
   return { size, packageCount, mtimeMs: stat?.mtimeMs ?? null }
 }
 
-/** Count top-level installable packages: dirs (incl. symlinked ones) minus dotdirs; `@scope` expands. */
+/** Count top-level installable packages: plain dirs + symlinked dirs counted as packages; scopes expanded. */
 export async function countTopLevelPackages(entryPath: string): Promise<number> {
-  let dirents: Dirent<string>[]
-  try {
-    dirents = await fs.readdir(entryPath, { withFileTypes: true })
-  } catch {
-    return 0
-  }
-
-  let count = 0
-  for (const dirent of dirents) {
-    if (dirent.name.startsWith('.')) continue // .pnpm, .bin, .cache, …
-
-    if (dirent.isDirectory()) {
-      if (dirent.name.startsWith('@')) count += await countScopedMembers(entryPath, dirent.name)
-      else count += 1
-      continue
-    }
-
-    if (dirent.isSymbolicLink()) {
-      // pnpm-style top-level links point at real package dirs; count them if they really are dirs.
-      const st = await fs.stat(path.join(entryPath, dirent.name)).then(
-        (value) => value,
-        () => null,
-      )
-      if (st?.isDirectory()) count += 1
-    }
-  }
-  return count
-}
-
-async function countScopedMembers(entryPath: string, scope: string): Promise<number> {
-  let members: Dirent<string>[]
-  try {
-    members = await fs.readdir(path.join(entryPath, scope), { withFileTypes: true })
-  } catch {
-    return 0
-  }
-  let count = 0
-  for (const dirent of members) {
-    if ((dirent.isDirectory() || dirent.isSymbolicLink()) && !dirent.name.startsWith('.')) count += 1
-  }
-  return count
+  return (await listTopLevelPackages(entryPath)).length
 }
 
 export interface MeasureOptions {

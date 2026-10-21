@@ -13,13 +13,14 @@ describe('scanForNodeModules', () => {
     const fx = await monorepoFixture('walker')
     try {
       const { entries } = await scanForNodeModules([fx.root])
-      const names = entries.map((entry) => path.relative(fx.root, entry)).sort()
+      const names = entries.map((entry) => path.relative(fx.root, entry.path)).sort()
       expect(names).toEqual([
         path.join('api', 'node_modules'),
         path.join('bun-app', 'node_modules'),
         path.join('mobile', 'node_modules'),
         path.join('web', 'node_modules'),
       ])
+      expect(entries.every((entry) => !entry.nested && entry.ownerPath === entry.path)).toBe(true)
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
     }
@@ -29,9 +30,50 @@ describe('scanForNodeModules', () => {
     const fx = await monorepoFixture('depth')
     try {
       const found = await scanForNodeModules([fx.root], { maxDepth: 2 })
-      expect(found.entries).toContain(path.join(fx.root, 'web', 'node_modules'))
+      expect(found.entries.map((entry) => entry.path)).toContain(path.join(fx.root, 'web', 'node_modules'))
       const shallow = await scanForNodeModules([fx.root], { maxDepth: 1 })
       expect(shallow.entries).toEqual([])
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('-r discovers nested node_modules and marks them nested under their owner', async () => {
+    const fx = await monorepoFixture('walker-recursive')
+    try {
+      const { entries } = await scanForNodeModules([fx.root], { recursive: true })
+      const nested = entries.filter((entry) => entry.nested)
+      expect(nested).toHaveLength(1)
+      expect(path.relative(fx.root, nested[0].path)).toBe(
+        path.join('web', 'node_modules', 'react', 'nested', 'node_modules'),
+      )
+      expect(nested[0].ownerPath).toBe(path.join(fx.root, 'web', 'node_modules'))
+      expect(entries.filter((entry) => !entry.nested)).toHaveLength(4)
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('honors exclude globs on absolute paths, paths relative to the root, and bare names', async () => {
+    const fx = await monorepoFixture('walker-exclude')
+    try {
+      const bare = await scanForNodeModules([fx.root], { excludes: ['api'] })
+      expect(bare.entries.map((entry) => path.relative(fx.root, entry.path))).not.toContain(
+        path.join('api', 'node_modules'),
+      )
+      expect(bare.entries.map((entry) => path.relative(fx.root, entry.path))).toContain(
+        path.join('web', 'node_modules'),
+      )
+
+      const relative = await scanForNodeModules([fx.root], { excludes: ['web/node_modules'] })
+      expect(relative.entries.map((entry) => path.relative(fx.root, entry.path))).not.toContain(
+        path.join('web', 'node_modules'),
+      )
+
+      const globbed = await scanForNodeModules([fx.root], { excludes: ['**/mobile/**'] })
+      expect(globbed.entries.map((entry) => path.relative(fx.root, entry.path))).not.toContain(
+        path.join('mobile', 'node_modules'),
+      )
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
     }

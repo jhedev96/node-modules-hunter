@@ -3,11 +3,6 @@
  * warn (never silently swallow) and continue.
  */
 const FUTURE_FLAGS = new Set([
-  'exclude',
-  'keep',
-  'pm',
-  'recursive',
-  'depth',
   'empty',
   'animate',
   'global',
@@ -30,7 +25,6 @@ const FUTURE_FLAGS = new Set([
   'compare',
   'history',
   'config',
-  'expand',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */
