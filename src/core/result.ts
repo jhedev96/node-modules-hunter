@@ -122,6 +122,50 @@ export interface StatsOutcome {
   permissionIssues: string[]
 }
 
+export interface GlobalBinIssue {
+  /** package that declares the bin */
+  name: string
+  kind: 'broken bin symlink' | 'missing bin symlink'
+  /** bin name (file name inside the PM's bin dir) */
+  detail: string
+}
+
+export interface GlobalPackageInfo {
+  name: string
+  version: string | null
+  symlinked: boolean
+  /** Bytes for real package dirs; null for symlinked (never followed). */
+  size: number | null
+}
+
+export interface GlobalPmReport {
+  pm: string
+  /** The global node_modules dir found for this PM. */
+  root: string
+  /** Global bin dir when discoverable; null = dead-glob checks skipped. */
+  binDir: string | null
+  source: 'pm' | 'fallback'
+  packages: GlobalPackageInfo[]
+  dead: GlobalBinIssue[]
+}
+
+export interface GlobalDuplicate {
+  name: string
+  pms: string[]
+  /** Smallest instance size — uninstalling one PM's copy recovers at least this. */
+  savings: number
+}
+
+export interface GlobalOutcome {
+  /** 0 report produced, 2 nothing found. */
+  code: number
+  reports: GlobalPmReport[]
+  skippedPms: string[]
+  duplicates: GlobalDuplicate[]
+  totals: { packages: number; size: number }
+  permissionIssues: string[]
+}
+
 export interface ScanTotals {
   folders: number
   size: number

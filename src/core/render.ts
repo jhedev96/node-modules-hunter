@@ -7,6 +7,9 @@ import { toolVersion } from '../utils/version.ts'
 import type {
   DeleteMode,
   DeleteOutcome,
+  GlobalDuplicate,
+  GlobalOutcome,
+  GlobalPmReport,
   MapOutcome,
   MapProjectInfo,
   PMInfo,
@@ -499,8 +502,7 @@ export function renderStatsJson(outcome: StatsOutcome, request: { tree?: boolean
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? 'report',
-    topN: request.topN ?? 10,
+    mode: request.tree === true ? 'tree' : request.by ?? 'report',    topN: request.topN ?? 10,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
     sizeGroups: outcome.sizeGroups,
@@ -531,6 +533,97 @@ export function renderStatsJson(outcome: StatsOutcome, request: { tree?: boolean
               devDependencies: project.declared.devDependencies,
             },
     })),
+  }
+  return JSON.stringify(payload, null, 2)
+}
+
+export function renderGlobalReport(outcome: GlobalOutcome, request: { cwd: string }): string {
+  const lines: string[] = []
+  lines.push(colors.cyan('🌐 nmh stats — global installation analysis'))
+  lines.push(colors.dim('(⚠️ global mode — read-only; needs access to the PM prefixes — sudo is never auto-applied)'))
+  lines.push('')
+  const attempted = ['npm', 'pnpm', 'yarn', 'bun']
+  lines.push(`PM detected      : ${outcome.reports.map((report) => report.pm).join(', ') || '—'}${skippedSuffix(outcome, attempted)}`)
+  lines.push(`Total global     : ${outcome.totals.packages} packages — ${formatBytes(outcome.totals.size)}`)
+  lines.push('')
+
+  for (const report of outcome.reports) {
+    lines.push(colors.bold(`${report.pm} · ${shortenPath(report.root, request.cwd)}`))
+    lines.push(globalPackageTable(report, outcome.duplicates))
+    if (report.dead.length > 0) {
+      lines.push(colors.yellow(`⚠ dead globals in ${report.pm}: ${report.dead.length} (broken/missing bin symlink)`))
+      for (const dead of report.dead.slice(0, 5)) {
+        lines.push(colors.yellow(`  - ${dead.name} → ${dead.detail} (${dead.kind})`))
+      }
+      if (report.dead.length > 5) lines.push(colors.yellow(`  … plus ${report.dead.length - 5} more`))
+    }
+    lines.push('')
+  }
+
+  if (outcome.duplicates.length > 0) {
+    const savings = outcome.duplicates.reduce((sum, dup) => sum + dup.savings, 0)
+    lines.push(colors.yellow(`⚠ Cross-PM duplicates : ${outcome.duplicates.length} package(s) (~${formatBytes(savings)} could be saved — uninstall one of them)`))
+    for (const dup of outcome.duplicates.slice(0, 8)) {
+      lines.push(`  - ${dup.name}: ${dup.pms.join(' + ')}`)
+    }
+    if (outcome.duplicates.length > 8) lines.push(`  … plus ${outcome.duplicates.length - 8} more`)
+    lines.push('')
+  }
+  if (outcome.permissionIssues.length > 0) {
+    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} unreadable location(s) — exit code 4`))
+  }
+  return lines.join('\n')
+}
+
+function skippedSuffix(outcome: GlobalOutcome, attempted: string[]): string {
+  const skipped = attempted.filter((pm) => !outcome.reports.some((report) => report.pm === pm))
+  return skipped.length > 0 ? colors.dim(`  (not found: ${skipped.join(', ')})`) : ''
+}
+
+function globalPackageTable(report: GlobalPmReport, duplicates: GlobalDuplicate[]): string {
+  const table = new Table({
+    head: [colors.dim('Package'), colors.dim('Version'), colors.dim('Size'), colors.dim('PM')],
+    style: { head: [], border: colorEnabled() ? ['gray'] : [] },
+  })
+  const dupNames = new Set(duplicates.map((dup) => dup.name))
+  for (const pkg of report.packages) {
+    table.push([
+      colors.bold(pkg.name) + (dupNames.has(pkg.name) ? colors.dim(' ← in more than one PM') : ''),
+      pkg.version ?? '—',
+      formatBytes(pkg.size ?? 0),
+      report.pm,
+    ])
+  }
+  return table.toString()
+}
+
+export function renderGlobalJson(outcome: GlobalOutcome, request: { pmFilter?: string[] | null }): string {
+  const payload = {
+    nmh: toolVersion(),
+    command: 'stats',
+    mode: 'global',
+    pmFilter: request.pmFilter ?? null,
+    totals: {
+      ...outcome.totals,
+      sizeFormatted: formatBytes(outcome.totals.size),
+    },
+    duplicates: outcome.duplicates.map((dup) => ({ ...dup, savingsFormatted: formatBytes(dup.savings) })),
+    pms: outcome.reports.map((report) => ({
+      pm: report.pm,
+      root: report.root,
+      binDir: report.binDir,
+      source: report.source,
+      dead: report.dead,
+      packages: report.packages.map((pkg) => ({
+        name: pkg.name,
+        version: pkg.version,
+        symlinked: pkg.symlinked,
+        size: pkg.size,
+        sizeFormatted: pkg.size == null ? null : formatBytes(pkg.size),
+      })),
+    })),
+    skippedPms: outcome.skippedPms,
+    permissionIssues: outcome.permissionIssues,
   }
   return JSON.stringify(payload, null, 2)
 }

@@ -31,3 +31,10 @@ export function formatAge(mtimeMs: number | null, now = Date.now()): string {
   if (months < 24) return `${months}mo ago`
   return `${Math.floor(days / 365)}y ago`
 }
+
+const ANSI_ESCAPE = /\u001b\[[0-9;]*[A-Za-z]/g
+
+/** Strip ANSI escapes (and stray carriage returns) for file-based report copies. */
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE, '').replace(/\r/g, '')
+}

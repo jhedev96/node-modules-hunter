@@ -1,10 +1,12 @@
 import { cac } from 'cac'
+import path from 'node:path'
 import { configureLogger, errorLog, warn, verboseLog } from './utils/logger.ts'
 import { splitTargets } from './utils/paths.ts'
 import { toolVersion } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { loadConfig, ConfigError } from './utils/config.ts'
 import { setLogDirectory } from './utils/delete-log.ts'
+import { REPORT_EXTENSIONS } from './utils/report.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
 import { runMap } from './commands/map.ts'
@@ -12,6 +14,7 @@ import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
+import { runGlobal } from './commands/global.ts'
 import type { DeleteMode } from './core/result.ts'
 import type { NmhConfig } from './utils/config.ts'
 
@@ -41,6 +44,10 @@ cli.option('--stats', 'Stats report: overview + dup factor + waste + top sizes �
 cli.option('--top <n>', 'stats only: rows in the focused size list (default 10)')
 cli.option('--by <mode>', "stats only: breakdown mode — size (alias: package); 'type' lands in v0.4")
 cli.option('--config <file>', 'Use this config file instead of the .nmhrc lookup (cwd → home)')
+cli.option('-g, --global', 'stats only: analyze global installs (per-PM prefix scan; read-only)')
+cli.option('--animate/--no-animate', 'Live size counter while measuring: --animate forces it on even when piped; --no-animate mutes it (auto = TTY only)')
+cli.option('--save-report <file>', 'scan only: ALSO write the printed report to a file (.json/.md/.txt, format by extension)')
+cli.option('--report <file>', 'alias of --save-report')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -117,6 +124,9 @@ async function main(): Promise<number> {
   // cac defaults the --no-color negation to color:true even when nobody passed it,
   // so "explicit --color on the CLI" is detected from argv, not from flags.color.
   const cliColorExplicit = process.argv.includes('--color') || process.argv.includes('--color=true')
+  const json = flags.json === true || (Array.isArray(flags.json) && flags.json.includes(true))
+  // same story for --animate: argv is the only way to tell "flag given" from "cac default"
+  const progress: 'auto' | 'on' | 'off' = normalizeAnimate(process.argv, config.animate)
   configureLogger({
     verbose: flags.verbose === true,
     quiet: flags.quiet === true,
@@ -124,6 +134,8 @@ async function main(): Promise<number> {
       flags.noColor === true ||
       flags.color === false || // explicit CLI --no-color wins over config
       (config.color === false && !cliColorExplicit),
+    // --json shares stdout with the live counter → counter must stay silent
+    progress: json ? 'off' : progress,
   })
 
   for (const future of detectFutureFlags(Object.keys(flags))) {
@@ -170,9 +182,31 @@ async function main(): Promise<number> {
   const excludes = [...(config.exclude ?? []), ...splitTargets(flags.exclude as string | string[] | undefined)]
   const keep = [...(config.keep ?? []), ...splitTargets(flags.keep as string | string[] | undefined)]
   const effectiveDepth = depth ?? config.depth ?? undefined
+  const globalGiven = flags.global === true
+
+  // --save-report / --report (PRD §5.4): scan rides along and writes a file copy; --report is the alias
+  let reportPath: string | null = null
+  if (typeof flags.saveReport === 'string' && flags.saveReport.length > 0) reportPath = flags.saveReport
+  else if (flags.saveReport === true) {
+    errorLog('--save-report needs a file path (.json/.md/.txt)')
+    return 1
+  }
+  if (reportPath === null && flags.report !== undefined) {
+    if (typeof flags.report === 'string' && flags.report.length > 0) reportPath = flags.report
+    else {
+      errorLog('--report needs a file path (.json/.md/.txt)')
+      return 1
+    }
+  }
+  if (reportPath !== null) {
+    const ext = path.extname(reportPath).toLowerCase()
+    if (!(REPORT_EXTENSIONS as readonly string[]).includes(ext)) {
+      errorLog(`unknown report format: ${reportPath} (expected .json/.md/.txt)`)
+      return 1
+    }
+  }
 
   const cwd = process.cwd()
-  const json = flags.json === true || (Array.isArray(flags.json) && flags.json.includes(true))
   const dryRun = flags.dryRun === true
   const assumeYes = flags.yes === true || flags.force === true
 
@@ -182,8 +216,14 @@ async function main(): Promise<number> {
   const targets = [...rest, ...dirTargets]
 
   // `--pm` without a value is read-only reporting; a delete op needs an actual family to filter by.
-  if (pm.given && pm.family === null && (subcommand === 'clean' || deleted.given)) {
-    errorLog('--pm without a value only lists detected PMs — give a family (npm|pnpm|yarn|bun|vp) to filter a delete op')
+  if (pm.given && pm.family === null && (subcommand === 'clean' || deleted.given || globalGiven)) {
+    errorLog('--pm without a value only lists detected PMs — give a family (npm|pnpm|yarn|bun|vp) to filter a delete op or the --global analysis')
+    return 1
+  }
+
+  // --save-report writes scan output; delete/clean runs are not scan reports
+  if (reportPath !== null && (deleted.given || subcommand === 'clean')) {
+    errorLog('--save-report rides along with scan — delete/clean runs are not scan reports')
     return 1
   }
 
@@ -199,6 +239,7 @@ async function main(): Promise<number> {
     pmFilter: pm.family !== null ? [pm.family] : undefined,
     listPm: pm.given && pm.family === null,
     expand,
+    saveReport: reportPath ?? undefined,
   }
 
   if (subcommand === 'version') {
@@ -301,6 +342,22 @@ async function main(): Promise<number> {
       errorLog('--stats is read-only — combine it with scan, not with delete/clean')
       return 1
     }
+    if (globalGiven) {
+      if (treeGiven || flags.top !== undefined || by !== null) {
+        errorLog('--tree/--top/--by shape per-project stats — global mode has its own table')
+        return 1
+      }
+      const globalTargets = [...rest, ...dirTargets]
+      if (globalTargets.length > 0) {
+        errorLog('--global analyzes the PM global prefixes — no [dir] needed')
+        return 1
+      }
+      return runGlobal({
+        cwd,
+        json,
+        pmFilter: pm.family !== null ? [pm.family] : undefined,
+      })
+    }
     if (topN === 'invalid') {
       errorLog(`invalid --top: ${String(flags.top)} (expected a positive integer)`)
       return 1
@@ -323,6 +380,10 @@ async function main(): Promise<number> {
   }
   if (flags.top !== undefined || by !== null) {
     errorLog('--top/--by only work with the stats command')
+    return 1
+  }
+  if (globalGiven) {
+    errorLog('--global only works with the stats command — nmh stats -g')
     return 1
   }
 
@@ -370,8 +431,24 @@ async function main(): Promise<number> {
     return outcome.code
   }
 
+  // --save-report without any target still means "scan cwd" — the wizard would never write it
+  if (reportPath !== null) {
+    const outcome = await runScan(scanOptions)
+    return outcome.code
+  }
+
   // totally bare: wizard (TTY) / read-only scan (non-TTY, never hangs)
   return runWizard(cwd, { defaultMode: config.defaultMode })
+}
+
+/**
+ * --animate is negatable, so cac reports flags.animate=true even when nobody passed it;
+ * argv sniffing separates the explicit forms. .nmhrc animate:false mutes the default.
+ */
+function normalizeAnimate(argv: string[], configAnimate?: boolean): 'auto' | 'on' | 'off' {
+  if (argv.includes('--no-animate') || argv.includes('--animate=false')) return 'off'
+  if (argv.includes('--animate') || argv.includes('--animate=true')) return 'on'
+  return configAnimate === false ? 'off' : 'auto'
 }
 
 main()

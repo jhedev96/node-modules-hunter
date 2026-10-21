@@ -4,6 +4,8 @@ export interface LoggerOptions {
   verbose?: boolean
   quiet?: boolean
   noColor?: boolean
+  /** live progress line: auto = TTY only (default), on = forced, off = muted. */
+  progress?: 'auto' | 'on' | 'off'
   isTTY?: boolean
 }
 
@@ -12,6 +14,7 @@ interface LoggerState {
   quiet: boolean
   noColor: boolean
   isTTY: boolean
+  progress: 'auto' | 'on' | 'off'
 }
 
 let state: LoggerState = {
@@ -19,6 +22,7 @@ let state: LoggerState = {
   quiet: false,
   noColor: false,
   isTTY: process.stdout.isTTY === true,
+  progress: 'auto',
 }
 
 export function configureLogger(options: LoggerOptions): void {
@@ -27,6 +31,7 @@ export function configureLogger(options: LoggerOptions): void {
     quiet: options.quiet ?? state.quiet,
     noColor: options.noColor ?? state.noColor,
     isTTY: options.isTTY ?? state.isTTY,
+    progress: options.progress ?? state.progress,
   }
 }
 
@@ -93,6 +98,11 @@ export function errorLog(message: string): void {
   console.error(colors.red(message))
 }
 
+/** Side-channel info (e.g. "report saved") — stderr, skipped in quiet mode. */
+export function note(message: string): void {
+  if (!state.quiet) console.error(colors.cyan(`ℹ ${message}`))
+}
+
 /** Debug detail to stderr. */
 export function verboseLog(message: string): void {
   if (state.verbose && !state.quiet) console.error(colors.dim(`  · ${message}`))
@@ -100,14 +110,21 @@ export function verboseLog(message: string): void {
 
 const CLEAR_LINE = '\r\x1b[2K'
 
-/** In-place progress line (TTY only, never in quiet mode). */
+/** Whether the in-place progress line may print under the current mode. */
+function progressAllowed(): boolean {
+  if (state.progress === 'off') return false
+  if (state.progress === 'on') return true
+  return state.isTTY // 'auto'
+}
+
+/** In-place progress line (per progress mode; never in quiet mode). */
 export function progressLine(message: string): void {
-  if (state.quiet || !state.isTTY) return
+  if (state.quiet || !progressAllowed()) return
   process.stdout.write(CLEAR_LINE + colors.dim(message))
 }
 
 /** Clear the in-place progress line. */
 export function clearProgress(): void {
-  if (state.quiet || !state.isTTY) return
+  if (state.quiet || !progressAllowed()) return
   process.stdout.write(CLEAR_LINE)
 }

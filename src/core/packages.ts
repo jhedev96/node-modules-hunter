@@ -12,6 +12,8 @@ export interface LoosePackageJson {
   dependencies?: Record<string, unknown>
   devDependencies?: Record<string, unknown>
   peerDependencies?: Record<string, unknown>
+  /** npm-style bin declaration: 'cli.js' | { name: file, ... } */
+  bin?: string | Record<string, string>
 }
 
 export async function readPackageJson(dir: string): Promise<LoosePackageJson | null> {

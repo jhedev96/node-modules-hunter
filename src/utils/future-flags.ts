@@ -4,12 +4,8 @@
  */
 const FUTURE_FLAGS = new Set([
   'empty',
-  'animate',
-  'global',
 
   'why',
-  'report',
-  'saveReport',
   'updateCheck',
   'online',
   'co2',

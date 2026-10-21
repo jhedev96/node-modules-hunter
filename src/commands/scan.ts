@@ -1,7 +1,8 @@
 import path, { basename } from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog } from '../utils/logger.ts'
-import { formatBytes } from '../utils/format.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
+import { formatBytes, stripAnsi } from '../utils/format.ts'
+import { saveReportFile } from '../utils/report.ts'
 import { resolveRoots } from '../utils/paths.ts'
 import { makeGlobMatcher } from '../utils/match.ts'
 import { scanForNodeModules, type WalkEntry } from '../core/walker.ts'
@@ -31,6 +32,8 @@ export interface ScanRequest {
   listPm?: boolean
   /** --expand: show full absolute paths instead of shortened ones. */
   expand?: boolean
+  /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
+  saveReport?: string
 }
 
 export interface ScanOutcome {
@@ -216,17 +219,39 @@ export async function runScan(request: ScanRequest): Promise<ScanOutcome> {
 
   if (result.entries.length === 0) {
     if (!request.json) warn('no node_modules found — nothing to hunt here 🙃')
-    else log(renderScanResult(result, { cwd: request.cwd, json: true, sizeMode: request.sizeMode ?? 'each' }))
+    else log(renderedScan(result, request, true))
+    await writeReport(request, result)
     return outcome
   }
 
-  log(renderScanResult(result, {
+  log(renderedScan(result, request, request.json === true))
+  await writeReport(request, result)
+  return outcome
+}
+
+function renderedScan(result: ScanCommandResult, request: { cwd: string; sizeMode?: 'each' | 'total'; expand?: boolean; json?: boolean }, json: boolean): string {
+  return renderScanResult(result, {
     cwd: request.cwd,
-    json: request.json === true,
+    json,
     sizeMode: request.sizeMode ?? 'each',
     expand: request.expand === true,
-  }))
-  return outcome
+  })
+}
+
+/** --save-report: write the same report (stripped of ANSI for md/txt) alongside the screen print. */
+async function writeReport(request: ScanRequest, result: ScanCommandResult): Promise<void> {
+  if (!request.saveReport) return
+  const ext = path.extname(request.saveReport).toLowerCase()
+  try {
+    const content =
+      ext === '.json'
+        ? renderedScan(result, request, true)
+        : stripAnsi(renderedScan(result, request, false))
+    await saveReportFile(request.saveReport, content + '\n')
+    note(`💾 report saved → ${request.saveReport} (${ext.slice(1)})`)
+  } catch (err) {
+    warn(`report write failed — continuing (${err instanceof Error ? err.message : String(err)})`)
+  }
 }
 
 function emptyResult(targets: string[], unresolvable: string[] = []): ScanCommandResult {

@@ -22,10 +22,11 @@ export interface RunResult {
 /** Spawn the built CLI like a real user would (non-TTY by construction). */
 export async function runCli(
   args: string[],
-  options: { cwd?: string; home?: string; timeout?: number } = {},
+  options: { cwd?: string; home?: string; timeout?: number; envExtra?: Record<string, string> } = {},
 ): Promise<RunResult> {
   const env: NodeJS.ProcessEnv = { ...process.env }
   if (options.home) env.HOME = options.home
+  if (options.envExtra) Object.assign(env, options.envExtra)
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
