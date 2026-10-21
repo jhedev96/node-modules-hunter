@@ -31,11 +31,15 @@ nmh                                # interactive wizard (scan cwd → checkbox �
 nmh <path> [path…]                 # shortcut: scan given path(s)
 nmh scan [dir]                     # full scan (default: cwd)
 nmh clean [dir]                    # scan + delete everything safe (trash by default)
+nmh search <pattern> [dir…]        # find installed packages by name (+ versions & sizes)
+nmh map [dir]                      # project → PM → size → top packages → declared deps
 
 nmh --dir=A,B,glob/*/node_modules  # targets: comma list, globs, ~ — combine with flags below
 nmh version | --version | -v
 nmh help    | --help    | -h
 ```
+
+Search patterns: plain text is a case-insensitive substring (`nmh search lodash`), glob chars match whole names (`v*`, `@scope/*`), and `/re/flags` is a real regex (`/^vi/`).
 
 | Flag | Effect |
 | --- | --- |
@@ -45,6 +49,15 @@ nmh help    | --help    | -h
 | `-f, --force` | Skip confirmations (implies `--yes`) |
 | `-y, --yes` | Answer yes to every prompt |
 | `--size total\|each` | Aggregate-only output (default: per-folder table) |
+| `-r, --recursive` | Also look INSIDE found `node_modules` — nested entries are listed flagged and never counted twice in totals |
+| `--pm <family>` | Keep only entries detected as `npm\|pnpm\|yarn\|bun\|vp`; bare `--pm` just lists what was detected |
+| `--exclude <globs>` | Drop matching paths from results and traversal (comma list, e.g. `**/e2e/**`) |
+| `--keep <pkgs>` | Refuse to delete the `node_modules` of these projects (comma list, glob ok) |
+| `--depth <n>` | Hard cap on discovery depth (levels below the target) |
+| `--expand` | Full absolute paths in output |
+| `--search <pattern>` | Same as the `search` command, mixed into any read-only form (`nmh --dir=X --search lodash`) |
+| `-m, --map [--tree]` | Project map table; `--tree` lists package names per project |
+| `--depend [pkg]` | With `map`: show declared deps per project; with a value, list which projects declare it |
 | `--json` | Machine-readable output (pipe into `jq`) |
 | `-q/--quiet`, `--verbose`, `--no-color` | Output control |
 
@@ -103,11 +116,32 @@ Nearest-evidence-first, ordered like the [`vp`](https://viteplus.dev/guide/insta
 3. lockfiles: `pnpm-workspace.yaml`/`pnpm-lock.yaml` → pnpm, `yarn.lock`/`.yarnrc.yml` → yarn, `package-lock.json` → npm, `bun.lock`/`bun.lockb` → bun
 4. nothing conclusive → `unknown` (shown as `—`; nmh never guesses for deletion)
 
-A wizard-scoped project tags the underlying manager (e.g. `pnpm [vp]` in later versions); the node_modules layout and cleanup strategy are always the underlying PM's.
+A `vp`-scoped project tags the underlying manager as `pnpm [vp]` / `npm [vp]` (etc.); the node_modules layout and cleanup strategy are always the underlying PM's. Filter such projects with `--pm vp`.
+
+## Monorepo-aware extras (v0.2)
+
+```bash
+$ nmh search lodash ./my-repo
+🔍 'lodash' → 2 package(s) in 1 node_modules
+
+./my-repo/packages/web/node_modules · pnpm · 1.20 GB
+   • lodash@4.17.21 528.0 KB
+
+$ nmh map ./my-repo
+┌─────────┬────────────┬─────────┬─────────┬──────────┐
+│ Project │ PM         │ Size    │ TopPkgs │ Declared │
+├─────────┼────────────┼─────────┼─────────┼──────────┤
+│ web     │ pnpm [vp]  │ 1.20 GB │ 1843    │ 42       │
+│ api     │ npm        │ 640 MB  │ 912     │ 18       │
+└─────────┴────────────┴─────────┴─────────┴──────────┘
+
+$ nmh map ./my-repo --tree          # package names per project
+$ nmh map ./my-repo --depend vite   # who declares vite? (declared level)
+```
 
 ## Roadmap
 
-This is the v0.1 MVP (scan · size · delete · wizard · guards · PM detection). Search, map, `--depend`, recursive audit, `--global`, config file, report export and the `stats` analysis suite (dup factor, waste size, scores, horoscope 🪐) follow the roadmap in [PROPOSAL.md](./PROPOSAL.md).
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 adds **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): `stats` analysis suite (dup factor, waste size, scores, licenses), per-package size breakdown in tree, global installs, config file, report export.
 
 ## Development
 

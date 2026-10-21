@@ -25,7 +25,7 @@ nmh --dir=./my-project,./my-repo/packages/*/node_modules --delete=hard
 2. Ukuran `node_modules` tidak proporsional (akibat duplikasi transitive deps, platform binaries, cache).
 3. Pembersihan manual rentan salah hapus karena harus cek satu per satu.
 4. Monorepo (pnpm/yarn/npm workspaces) punya puluhan `node_modules` tersebar di sub-package.
-5. Tidak ada tool yang ringan, satu perintah, dan cross-package-manager.
+5. Tools yang ada belum memenuhi: npkill TUI-nya interaktif (kurang scriptable untuk CI), dan belum ada yang satu-perintah, cross-platform, lintas package manager (npm/pnpm/yarn/bun + wrapper vite+), dengan akuntansi symlink yang benar untuk pnpm.
 
 3. Goals & Non-Goals
 
@@ -89,7 +89,7 @@ Flag	Nilai	Deskripsi
 `--delete` \| `--d`	`hard` \| `soft` \| `trash`	Mode hapus. `hard` = hapus permanen (`rm -rf` style, via `fs.rm recursive force`). `soft`/`trash` = pindah ke OS trash (pakai lib `trash`). Tanpa nilai = prompt pilih mode.	
 `--size`	`total` \| `each` \| `<n>`	Hitung ukuran. `total` = agregat semua target; `each` = per folder (default); `<n>` = top-N terbesar (mis. `--size 10`). Unit otomatis B/KB/MB/GB.	
 `--recursive` \| `-r`	boolean	Masuk ke dalam `node_modules` bersarang (node_modules di dalam node_modules) untuk audit ukuran & search. Default: tidak (hanya top-level per project) untuk performa.	
-`--pm`	`npm` \| `pnpm` \| `yarn` \| `bun` \| `vp` (vite+)	Filter/filter-by package manager, ditentukan dari lockfile di folder induk (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`, `vp-lock.yaml`). Tanpa nilai: list semua PM yang terdeteksi.	
+`--pm`	`npm` \| `pnpm` \| `yarn` \| `bun` \| `vp` (vite+)	Filter/filter-by package manager, ditentukan dari folder induk: field `packageManager`/`devEngines.packageManager` atau lockfile (`package-lock.json`, `pnpm-lock.yaml`/`pnpm-workspace.yaml`, `yarn.lock`/`.yarnrc.yml`, `bun.lock`/`bun.lockb`). Proyek ber-wrapper vite+ ditag `[vp]` di atas PM dasarnya. Tanpa nilai: list semua PM yang terdeteksi (read-only).	
 `-g` \| `--global`	boolean	Operasi pada install global (mis. global `node_modules`, prefix npm). Memerlukan konfirmasi ekstra; di Windows/UAC & Unix butuh permission — tampilkan instruksi `sudo`/elevated kalau gagal tulis, jangan auto-elevate.	
 `--expand`	boolean	Expand jalur hasil map/scan/search menjadi full absolute path + tampilkan detail (size, jumlah package, PM). Relevan di: `scan`, `search`, `map`, `-r`, `-g`, `--pm`.	
 `--depend`	boolean	Tampilkan jalur dependensi: package X dipakai oleh siapa saja (hasil parse `package.json` + lockfile, lazy — hanya kalau diminta, karena parsing lockfile berat).	
@@ -106,11 +106,11 @@ Flag	Nilai	Alasan
 `--exclude`	`<glob[,glob]>`	Kecualikan path (mis. `--exclude=./node_modules,**/keep-this`).	
 `--keep`	`<pkg[,pkg]>`	Jangan hapus `node_modules` milik package tertentu (mis. `--keep=react-native`).	
 `--empty`	boolean	Setelah hapus, hapus juga folder induk yang jadi kosong (mis. project lama tanpa source).	
-`--depth`	`<n>`	Batasi kedalaman scan (default tanpa `-r`: 1 level project; dengan `-r`: 4).	
+`--depth`	`<n>`	Batas kedalaman scan MURNI: jumlah level direktori di bawah target; `node_modules` hanya ditemukan bila levelnya ≤ n. Semantik traversal tidak berubah — bebas turun ke subfolder, tapi tidak pernah masuk ke dalam `node_modules` yang sudah ditemukan kecuali `-r`. Default: tanpa batas.	
 `--json`	boolean	Output JSON (untuk dipipe ke jq / dipakai script lain).	
 `--tree`	boolean	Output tree view hasil map (alternatif dari tabel).	
 `--report` \| `--save-report`	`<file>`	Simpan hasil scan ke file (md/json/txt).	
-`--update-check`	boolean	Cek update tool (non-blocking, cached 24h).	
+`--update-check`	boolean	Cek update tool (non-blocking, cached 24h). Default OFF — opt-in via flag/config.	
 `--no-color`	boolean	Matikan ANSI color (otomatis off kalau non-TTY).	
 `--stats`	boolean	Jalankan metadata report (lihat §8).	
 `--by`	`package` \| `type` \| `size`	Mode breakdown stats.	
@@ -327,7 +327,7 @@ npm	`package-lock.json`	—
 pnpm	`pnpm-lock.yaml`	Struktur `.pnpm` — saat delete, hapus juga `.pnpm` virtual store di folder yang sama; symlink jangan di-follow.	
 yarn (v1/berry)	`yarn.lock`	Yarn berry: `.yarn/cache` — flag `--pm yarn` juga report `.yarn` folder.	
 bun	`bun.lockb` / `bun.lock`	`bun.lockb` binary — deteksi cukup by filename.	
-vp (vite+)	`vp-lock.yaml` (placeholder — sesuaikan format aktual)	Treat sebagai PM turunan; reuse strategi pnpm-like kalau struktur mirip.	
+vp (vite+)	Bukan package manager — *wrapper*. Deteksi: manifest proyek mendeklarasikan `vite-plus` / `@voidzero-dev/vite-plus-core` (dependencies/devDependencies/peerDependencies).	Tag `[vp]` ditempel pada PM dasar yang sah (lockfile/field). Layout node_modules & strategi cleanup selalu milik PM dasar; filter via `--pm vp`.	
 
 Auto-detect: scan sibling lockfile dari `node_modules` yang ketemu. Kalau >1 lockfile → tampilkan semua, beri tag `[multiple]`.
 
@@ -347,7 +347,7 @@ Auto-detect: scan sibling lockfile dari `node_modules` yang ketemu. Kalau >1 loc
 }
 ```
 
-Precedence: CLI flag > config file > default built-in.
+Precedence: CLI flag > config file (paling dekat: dari cwd naik sampai home) > default built-in. Config opsional: tanpa `.nmhrc` semua tetap aman pakai default; `--config <file>` mengganti lokasi lookup.
 
 ---
 
@@ -434,7 +434,7 @@ Run again without --dry-run to execute.
 
 Fase	Fitur	
 MVP (v0.1)	scan, size, delete hard/trash, wizard, help/version, guards dasar, npm/pnpm detect	
-v0.2	search, map, --depend, --pm filter semua PM, --recursive, --dry-run, --json	
+v0.2	✅ SELESAI — search (+--search), map (+--tree/--depend declared-level), --pm filter semua PM incl. tag [vp], -r recursive audit, --exclude/--keep/--depth/--expand (85 test hijau)	
 v0.3	--global, --animate polish, config file, report export, tree view, `stats` dasar (size breakdown, dup factor, top-N)	
 v0.4	lockfile-aware dedup suggestion, `--depend` enriched (inbound map), `--why`, phantom/dead deps audit, baseline & `--compare`	
 v0.4	lockfile-aware dedup suggestion ("package X ada 14 copy, 300 MB bisa dihemat"), update-check	
@@ -453,6 +453,7 @@ v1.0	stabil API, docs lengkap, publish npm
 - `--dry-run` tidak melakukan penghapusan sama sekali (testable: hitung folder sebelum/sesudah).
 - Exit codes sesuai §6.8.
 - Non-TTY mode tidak hang menunggu input.
+- Test suite (unit + e2e lewat binary asli) hijau penuh: 36 test saat v0.1, 85 test saat v0.2 — fixture monorepo deterministik berisi keempat keluarga PM, symlink pnpm, `.pnpm` store, nested `node_modules`, dan victim symlink-loop (guard ELOOP).
 - `nmh stats <dir>` menghasilkan: total size, instance vs unique count, duplication factor, waste size, top-5 per size — dan angka size konsisten dengan `--size total` (selisih <2%).
 - `--compare` menampilkan delta yang benar terhadap baseline tersimpan.
 - `nmh stats [dir]` tanpa subflag mencetak seluruh seksi report (bukan ringkasan terpilih).
@@ -460,15 +461,19 @@ v1.0	stabil API, docs lengkap, publish npm
 
 ---
 
-17. Open Questions (untuk lu putusin sebelum coding)
+17. Keputusan (tercatat saat implementasi — dulunya Open Questions)
 
-1. Nama bin final: `nmh` aja, atau tetap full `node-modules-hunter` sebagai bin utama?
-2. Default delete mode di wizard: `trash` (aman) atau tetap wajib user pilih tiap kali?
-3. Lockfile vp (vite+) format aktualnya apa? — perlu riset kecil, sementara treat sebagai alias pnpm-like.
-4. Fungsionalitas "suggestion dedup" masuk v0.4 — setuju atau diprioritaskan lebih awal?
-5. Logging ke `~/.nmh/logs/` — default on atau opt-in?
-6. Estimasi CO2 & Bloat Score — masuk sebagai fitur resmi atau experimental flag?
-7. Audit phantom/dead deps perlu static import scan — setuju best-effort (regex), atau pakai parser beneran (biar lebih akurat tapi nambah dependency berat)?
+| # | Pertanyaan | Keputusan |
+| --- | --- | --- |
+| 1 | Nama bin final? | `nmh` bin utama + alias `node-modules-hunter` — dua-duanya terpasang. |
+| 2 | Default delete mode di wizard? | `trash` (aman), pre-highlighted; user tetap bebas ganti mode. |
+| 3 | Lockfile vp (vite+)? | vp adalah **wrapper, bukan package manager** — tidak ada `vp-lock.yaml`. Deteksi lewat manifest (deklarasi `vite-plus` / `@voidzero-dev/vite-plus-core`), hasilnya tag `[vp]` di atas PM dasar yang sah. |
+| 4 | Suggestion dedup diprioritaskan? | Tidak — tetap v0.4 (lockfile-aware). |
+| 5 | Logging `~/.nmh/logs/`? | DEFAULT ON untuk setiap operasi delete (hard maupun trash) → `~/.nmh/logs/delete-*.json` (recovery reference). |
+| 6 | CO2 & Bloat Score resmi? | Flag experimental saat fiturnya dibangun (v0.5) — bukan metrik resmi di output normal. |
+| 7 | Phantom/dead: regex atau parser? | Best-effort regex tanpa dependency baru; parser "beneran" ditunda sampai ada kebutuhan nyata. |
+
+Status: v0.1 MVP + v0.2 (search & `--search`, map & `--tree` & `--depend` declared-level, `--pm` incl. tag `[vp]`, `-r`, `--exclude`, `--keep`, `--depth`, `--expand`) selesai — suite 85 test hijau (unit + e2e via binary asli).
 
 ---
 
