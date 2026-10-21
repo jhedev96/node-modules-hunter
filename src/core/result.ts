@@ -53,6 +53,34 @@ export interface SearchOutcome {
   permissionIssues: string[]
 }
 
+export interface MapPackageRef {
+  name: string
+  version: string | null
+  symlinked: boolean
+}
+
+export interface MapDeclared {
+  projectDir: string
+  name: string | null
+  dependencies: string[]
+  devDependencies: string[]
+}
+
+export interface MapProjectInfo {
+  entry: ScanEntry
+  /** Manifest name of the nearest enclosing project (may be null). */
+  project: string | null
+  topPackages: MapPackageRef[]
+  declared: MapDeclared | null
+}
+
+export interface MapOutcome {
+  /** 0 mapped, 2 nothing found, 4 partial permission issues. */
+  code: number
+  projects: MapProjectInfo[]
+  permissionIssues: string[]
+}
+
 export interface ScanTotals {
   folders: number
   size: number

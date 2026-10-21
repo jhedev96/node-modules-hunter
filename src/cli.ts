@@ -5,6 +5,7 @@ import { toolVersion } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
+import { runMap } from './commands/map.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
@@ -29,6 +30,9 @@ cli.option('--keep <pkgs>', 'Refuse to delete node_modules of these projects (co
 cli.option('--depth <n>', 'Max scan depth in levels below the target')
 cli.option('--expand', 'Full absolute paths + extra detail in output')
 cli.option('--search <pattern>', 'Search installed packages (substring, glob, or /regex/) — read-only')
+cli.option('-m, --map', 'Map projects: PM, size, top-level packages, declared deps — read-only')
+cli.option('--tree', "map only: list package names per project (no per-package sizes yet)")
+cli.option('--depend [pkg]', "map only: show declared deps; with a value, list who declares it")
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -185,6 +189,37 @@ async function main(): Promise<number> {
       targets: searchTargets,
       cwd,
       json,
+      maxDepth: depth ?? undefined,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      expand,
+    })
+  }
+
+  // map: subcommand (`nmh map [dirs]`) or flag (`--map/-m`)
+  const treeGiven = flags.tree === true
+  const dependGiven = flags.depend !== undefined && flags.depend !== false
+  const dependPkg = typeof flags.depend === 'string' ? flags.depend : null
+  const mapGiven = flags.map === true || subcommand === 'map'
+  if ((treeGiven || dependGiven) && !mapGiven) {
+    errorLog('--tree/--depend only work with the map command')
+    return 1
+  }
+  if (mapGiven) {
+    if (deleted.given || subcommand === 'clean') {
+      errorLog('--map is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    const mapTargets = subcommand === 'map' ? [...rest, ...dirTargets] : targets
+    return runMap({
+      targets: mapTargets,
+      cwd,
+      json,
+      tree: treeGiven,
+      depend: dependGiven,
+      dependPkg,
       maxDepth: depth ?? undefined,
       recursive,
       excludes: excludes.length > 0 ? excludes : undefined,
