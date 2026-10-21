@@ -57,6 +57,8 @@ export interface MapPackageRef {
   name: string
   version: string | null
   symlinked: boolean
+  /** Directory size in bytes for real package dirs; null for symlinked packages / not requested. */
+  size: number | null
 }
 
 export interface MapDeclared {
@@ -78,6 +80,45 @@ export interface MapOutcome {
   /** 0 mapped, 2 nothing found, 4 partial permission issues. */
   code: number
   projects: MapProjectInfo[]
+  permissionIssues: string[]
+}
+
+export interface StatsPackageGroup {
+  /** Package name (scope included, `@foo/bar`). */
+  name: string
+  /** Number of install instances found (copies across all scanned entries). */
+  copies: number
+  /** Sum of instance sizes, bytes. */
+  totalSize: number
+  /** Only meaningful when copies > 1: bytes recoverable by deduplicating identical versions. */
+  dedupableSize?: number
+}
+
+export interface StatsOverview {
+  /** Total size of scanned node_modules (top-level only — matches `--size total`). */
+  totalSize: number
+  entryCount: number
+  /** Installed package instances (= top-level dirs across entries, nested included when scanned). */
+  instances: number
+  /** Distinct name@version pairs. */
+  unique: number
+  /** instances / unique, rounded to 1 decimal. */
+  dupFactor: number
+  /** Bytes recoverable by deduplicating identical versions. */
+  waste: number
+  /** waste / totalSize of packages, % rounded to 1 decimal. */
+  wastePercent: number
+  /** Sum of declared dependencies+devDependencies across scanned projects (when manifests found). */
+  declared: number | null
+}
+
+export interface StatsOutcome {
+  /** 0 report produced, 2 nothing found, 4 partial permission issues. */
+  code: number
+  projects: MapProjectInfo[]
+  overview: StatsOverview
+  /** Groups sorted by totalSize desc. */
+  sizeGroups: StatsPackageGroup[]
   permissionIssues: string[]
 }
 

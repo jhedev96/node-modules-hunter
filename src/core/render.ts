@@ -13,6 +13,7 @@ import type {
   ScanCommandResult,
   ScanEntry,
   SearchOutcome,
+  StatsOutcome,
   ScanTotals,
 } from './result.ts'
 
@@ -342,7 +343,8 @@ export function renderMapTree(projects: MapProjectInfo[], options: RenderMapOpti
       const branch = index === packages.length - 1 ? '└─' : '├─'
       const version = pkg.version ? colors.dim(`@${pkg.version}`) : ''
       const link = pkg.symlinked ? colors.dim(' (link)') : ''
-      lines.push(`  ${branch} ${pkg.name}${version}${link}`)
+      const size = pkg.size != null && !pkg.symlinked ? colors.dim(` (${formatBytes(pkg.size)})`) : ''
+      lines.push(`  ${branch} ${pkg.name}${version}${size}${link}`)
     })
   }
   return lines.join('\n')
@@ -392,8 +394,7 @@ export function renderMapDependReverse(
 export function renderMapJson(outcome: MapOutcome, request: { dependPkg?: string | null; tree?: boolean; depend?: boolean }): string {
   const payload = {
     nmh: toolVersion(),
-    command: 'map',
-    mode:
+    command: 'map',    mode:
       (request.depend === true && request.dependPkg) ? 'depend-reverse'
       : request.depend === true ? 'depend-list'
       : request.tree === true ? 'tree'
@@ -420,6 +421,105 @@ export function renderMapJson(outcome: MapOutcome, request: { dependPkg?: string
         name: pkg.name,
         version: pkg.version,
         symlinked: pkg.symlinked,
+        size: pkg.size,
+        sizeFormatted: pkg.size == null ? null : formatBytes(pkg.size),
+      })),
+      declared:
+        project.declared === null
+          ? null
+          : {
+              projectDir: project.declared.projectDir,
+              projectName: project.declared.name,
+              dependencies: project.declared.dependencies,
+              devDependencies: project.declared.devDependencies,
+            },
+    })),
+  }
+  return JSON.stringify(payload, null, 2)
+}
+
+export interface RenderStatsOptions {
+  cwd: string
+  expand?: boolean
+  topN: number
+  by: 'package' | 'size' | null
+}
+
+function projectBadges(projects: MapProjectInfo[]): string {
+  return `${projects.length} node_modules`
+}
+
+export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOptions): string {
+  const { overview } = outcome
+  const dim = colors.dim
+  const lines: string[] = []
+
+  lines.push(colors.cyan(`📊 nmh stats — ${projectBadges(outcome.projects)}${overview.waste > 0 ? dim(' · dedup potential detected') : ''}`))
+  lines.push('')
+  lines.push(`━━━ ${colors.bold('OVERVIEW')} ━━━`)
+  lines.push(`Total size        : ${formatBytes(overview.totalSize)} across ${overview.entryCount} node_modules`)
+  lines.push(
+    `Packages          : ${overview.instances} instances / ${overview.unique} unique (dup ${overview.dupFactor}×)`,
+  )
+  if (overview.declared !== null) {
+    lines.push(`Direct deps       : ${overview.declared} declared across the scanned projects`)
+  }
+  lines.push(`Waste (dedupable) : ${formatBytes(overview.waste)} (${overview.wastePercent}% of package sizes)`)
+
+  const top = outcome.sizeGroups.slice(0, options.topN)
+  if (top.length > 0) {
+    lines.push('')
+    lines.push(`━━━ ${colors.bold(`TOP ${options.topN} SIZE`)} ━━━`)
+    top.forEach((group, index) => {
+      const rank = String(index + 1).padStart(2)
+      const copies = group.copies > 1 ? colors.yellow(`×${group.copies} copies`) : dim('×1 copy')
+      const saving =
+        group.dedupableSize !== undefined
+          ? dim(`   ← dedup bisa hemat ${formatBytes(group.dedupableSize)}`)
+          : ''
+      lines.push(`${rank}. ${group.name}  ${copies}  ${formatBytes(group.totalSize)}${saving}`)
+    })
+    if (options.by === 'package' && outcome.sizeGroups.length > top.length) {
+      const rest = outcome.sizeGroups.slice(options.topN)
+      const restCount = rest.reduce((sum, group) => sum + group.copies, 0)
+      const restSize = rest.reduce((sum, group) => sum + group.totalSize, 0)
+      lines.push('')
+      lines.push(`━━━ ${colors.bold('LONG TAIL')} ━━━`)
+      lines.push(dim(`… plus ${rest.length} more package name(s) · ${restCount} instances · ${formatBytes(restSize)}`))
+    }
+  }
+
+  if (outcome.permissionIssues.length > 0) {
+    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`))
+  }
+  return lines.join('\n')
+}
+
+export function renderStatsJson(outcome: StatsOutcome, request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' }): string {
+  const payload = {
+    nmh: toolVersion(),
+    command: 'stats',
+    mode: request.tree === true ? 'tree' : request.by ?? 'report',
+    topN: request.topN ?? 10,
+    overview: outcome.overview,
+    permissionIssues: outcome.permissionIssues,
+    sizeGroups: outcome.sizeGroups,
+    projects: outcome.projects.map((project) => ({
+      project: project.project,
+      path: project.entry.path,
+      displayPath: project.entry.displayPath,
+      pm: project.entry.pm.family,
+      pmVp: project.entry.pm.vp,
+      nested: project.entry.nested === true,
+      ownerPath: project.entry.ownerPath ?? project.entry.path,
+      size: project.entry.size,
+      topPackagesCount: project.topPackages.length,
+      topPackages: project.topPackages.map((pkg) => ({
+        name: pkg.name,
+        version: pkg.version,
+        symlinked: pkg.symlinked,
+        size: pkg.size,
+        sizeFormatted: pkg.size == null ? null : formatBytes(pkg.size),
       })),
       declared:
         project.declared === null

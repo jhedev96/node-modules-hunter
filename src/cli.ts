@@ -6,6 +6,7 @@ import { detectFutureFlags } from './utils/future-flags.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
 import { runMap } from './commands/map.ts'
+import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
@@ -31,8 +32,11 @@ cli.option('--depth <n>', 'Max scan depth in levels below the target')
 cli.option('--expand', 'Full absolute paths + extra detail in output')
 cli.option('--search <pattern>', 'Search installed packages (substring, glob, or /regex/) — read-only')
 cli.option('-m, --map', 'Map projects: PM, size, top-level packages, declared deps — read-only')
-cli.option('--tree', "map only: list package names per project (no per-package sizes yet)")
+cli.option('--tree', "map/stats only: list per-project packages (tree view, with sizes)")
 cli.option('--depend [pkg]', "map only: show declared deps; with a value, list who declares it")
+cli.option('--stats', 'Stats report: overview + dup factor + waste + top sizes — read-only')
+cli.option('--top <n>', 'stats only: rows in the focused size list (default 10)')
+cli.option('--by <mode>', "stats only: breakdown mode — size (alias: package); 'type' lands in v0.4")
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -198,13 +202,40 @@ async function main(): Promise<number> {
     })
   }
 
-  // map: subcommand (`nmh map [dirs]`) or flag (`--map/-m`)
+  // map & stats: subcommand ('nmh map [dirs]' / 'nmh stats [dirs]') or flags (--map/-m, --stats)
   const treeGiven = flags.tree === true
   const dependGiven = flags.depend !== undefined && flags.depend !== false
   const dependPkg = typeof flags.depend === 'string' ? flags.depend : null
   const mapGiven = flags.map === true || subcommand === 'map'
-  if ((treeGiven || dependGiven) && !mapGiven) {
-    errorLog('--tree/--depend only work with the map command')
+  const statsGiven =
+    flags.stats === true || subcommand === 'stats' || subcommand === 'analyze' || subcommand === 'info'
+
+  let topN: number | null | 'invalid' = null
+  if (flags.top !== undefined) {
+    if (typeof flags.top === 'string' && /^\d+$/.test(flags.top) && Number.parseInt(flags.top, 10) >= 1) {
+      topN = Number.parseInt(flags.top, 10)
+    } else if (typeof flags.top === 'number' && Number.isInteger(flags.top) && flags.top >= 1) {
+      topN = flags.top
+    } else {
+      topN = 'invalid'
+    }
+  }
+
+  let by: 'package' | 'type' | 'size' | null = null
+  if (typeof flags.by === 'string') {
+    if (flags.by === 'package' || flags.by === 'size' || flags.by === 'type') by = flags.by
+    else {
+      errorLog(`invalid --by: ${flags.by} (expected 'package' | 'size'; 'type' lands in v0.4 via a focused flag)`)
+      return 1
+    }
+  }
+
+  if ((treeGiven || dependGiven) && !mapGiven && !statsGiven) {
+    errorLog('--tree/--depend only work with the map or stats command')
+    return 1
+  }
+  if (dependGiven && !mapGiven) {
+    errorLog('--depend only works with the map command (the stats view lands in v0.4)')
     return 1
   }
   if (mapGiven) {
@@ -227,6 +258,36 @@ async function main(): Promise<number> {
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       expand,
     })
+  }
+
+  if (statsGiven) {
+    if (deleted.given || subcommand === 'clean') {
+      errorLog('--stats is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    if (topN === 'invalid') {
+      errorLog(`invalid --top: ${String(flags.top)} (expected a positive integer)`)
+      return 1
+    }
+    const statsTargets = subcommand ? [...rest, ...dirTargets] : targets
+    return runStats({
+      targets: statsTargets,
+      cwd,
+      json,
+      tree: treeGiven,
+      topN: topN ?? undefined,
+      by: by ?? undefined,
+      maxDepth: depth ?? undefined,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      expand,
+    })
+  }
+  if (flags.top !== undefined || by !== null) {
+    errorLog('--top/--by only work with the stats command')
+    return 1
   }
 
   if (subcommand === 'scan') {

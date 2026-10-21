@@ -6,8 +6,8 @@ const FUTURE_FLAGS = new Set([
   'empty',
   'animate',
   'global',
+
   'why',
-  'stats',
   'report',
   'saveReport',
   'updateCheck',

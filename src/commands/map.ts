@@ -2,6 +2,7 @@ import { createLimiter } from '../utils/limit.ts'
 import { log, progressLine, clearProgress, warn, verboseLog } from '../utils/logger.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
+import { measureEntry } from '../core/sizer.ts'
 import {
   renderMapDepend,
   renderMapDependReverse,
@@ -56,14 +57,23 @@ export async function collectMap(request: MapRequest): Promise<MapOutcome> {
           projectDepsFor(entry.path),
           listTopLevelPackages(entry.path),
         ])
-        const versionLimiter = createLimiter(8)
+        const pkgLimiter = createLimiter(8)
         const topPackages = await Promise.all(
           refs.map((ref) =>
-            versionLimiter(async () => ({
-              name: ref.name,
-              version: await packageVersion(ref.path),
-              symlinked: ref.symlinked,
-            })),
+            pkgLimiter(async () => {
+              // version comes from the package's own manifest; size from a real-dir walk
+              // (symlinked packages are never followed — they show as links, unsized).
+              const [version, measure] = await Promise.all([
+                packageVersion(ref.path),
+                ref.symlinked ? Promise.resolve(null) : measureEntry(ref.path),
+              ])
+              return {
+                name: ref.name,
+                version,
+                symlinked: ref.symlinked,
+                size: measure === null ? null : measure.size,
+              }
+            }),
           ),
         )
         mapped += 1
