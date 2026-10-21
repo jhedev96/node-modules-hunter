@@ -42,6 +42,11 @@ export function isVerbose(): boolean {
   return state.verbose
 }
 
+/** Whether ANSI paint is currently enabled — cli-table3 borders honor this (its own colorizer ignores ours). */
+export function colorEnabled(): boolean {
+  return !state.noColor
+}
+
 const raw = (text: string): string => text
 type Paint = (text: string) => string
 

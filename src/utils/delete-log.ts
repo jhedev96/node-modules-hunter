@@ -3,7 +3,15 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { verboseLog } from './logger.ts'
 import { toolVersion } from './version.ts'
+import { expandTilde } from './paths.ts'
 import type { DeleteMode, DeleteOutcomeRow } from '../core/result.ts'
+
+/** Overridden by `logDir` in .nmhrc (see cli.ts); empty = default ~/.nmh/logs. */
+let logDirectoryOverride: string | null = null
+
+export function setLogDirectory(dir: string): void {
+  logDirectoryOverride = expandTilde(dir)
+}
 
 export interface DeleteLogPayload {
   mode: DeleteMode
@@ -18,7 +26,7 @@ export interface DeleteLogPayload {
  * Best effort: a failed log never breaks the delete itself.
  */
 export async function writeDeleteLog(payload: DeleteLogPayload): Promise<string | null> {
-  const dir = path.join(homedir(), '.nmh', 'logs')
+  const dir = logDirectoryOverride ?? path.join(homedir(), '.nmh', 'logs')
   try {
     await fs.mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')

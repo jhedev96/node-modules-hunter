@@ -8,7 +8,10 @@ import { formatBytes } from '../utils/format.ts'
 import type { DeleteMode, ScanEntry } from '../core/result.ts'
 
 /** No-arg entry point (PRD §7.5). TTY: full wizard. Non-TTY: plain safe scan, never hangs. */
-export async function runWizard(cwd: string): Promise<number> {
+export async function runWizard(
+  cwd: string,
+  options: { defaultMode?: DeleteMode } = {},
+): Promise<number> {
   if (!isTTYOut()) {
     const outcome = await collectScan({ targets: ['.'], cwd, maxDepth: 3 })
     if (outcome.result.entries.length > 0) {
@@ -71,7 +74,7 @@ export async function runWizard(cwd: string): Promise<number> {
       { value: 'trash', label: 'Move to OS trash — safe & restorable (recommended)' },
       { value: 'hard', label: 'Delete permanently — there is no undo' },
     ],
-    initialValue: 'trash',
+    initialValue: options.defaultMode ?? 'trash',
   })
   if (isCancel(modeChoice)) {
     outro('cancelled — nothing deleted')

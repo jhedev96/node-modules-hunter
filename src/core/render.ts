@@ -1,7 +1,7 @@
 import Table from 'cli-table3'
 import path from 'node:path'
 import { homedir } from 'node:os'
-import { colors, isSilent } from '../utils/logger.ts'
+import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
 import { formatBytes, formatAge } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type {
@@ -69,7 +69,7 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
       colors.dim('PM'),
       colors.dim('Modified'),
     ],
-    style: { head: [], border: ['gray'] },
+    style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
 
   const pushRow = (entry: ScanEntry, nested: boolean): void => {
@@ -310,7 +310,7 @@ export function renderMapTable(projects: MapProjectInfo[], options: RenderMapOpt
       colors.dim('TopPkgs'),
       colors.dim('Declared'),
     ],
-    style: { head: [], border: ['gray'] },
+    style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
 
   for (const project of projects) {

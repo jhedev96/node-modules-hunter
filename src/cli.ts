@@ -1,8 +1,10 @@
 import { cac } from 'cac'
-import { configureLogger, errorLog, warn } from './utils/logger.ts'
+import { configureLogger, errorLog, warn, verboseLog } from './utils/logger.ts'
 import { splitTargets } from './utils/paths.ts'
 import { toolVersion } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
+import { loadConfig, ConfigError } from './utils/config.ts'
+import { setLogDirectory } from './utils/delete-log.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
 import { runMap } from './commands/map.ts'
@@ -11,6 +13,7 @@ import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
 import type { DeleteMode } from './core/result.ts'
+import type { NmhConfig } from './utils/config.ts'
 
 const cli = cac('nmh')
 
@@ -37,6 +40,7 @@ cli.option('--depend [pkg]', "map only: show declared deps; with a value, list w
 cli.option('--stats', 'Stats report: overview + dup factor + waste + top sizes — read-only')
 cli.option('--top <n>', 'stats only: rows in the focused size list (default 10)')
 cli.option('--by <mode>', "stats only: breakdown mode — size (alias: package); 'type' lands in v0.4")
+cli.option('--config <file>', 'Use this config file instead of the .nmhrc lookup (cwd → home)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -90,10 +94,36 @@ async function main(): Promise<number> {
     return 0
   }
 
+  // .nmhrc (PRD §10): loaded before anything reads its values; explicit --config replaces the lookup
+  const explicitConfig = typeof flags.config === 'string' && flags.config.length > 0 ? flags.config : null
+  if (explicitConfig === null && flags.config !== undefined && flags.config !== false) {
+    errorLog('--config needs a file path — nmh --config <file> …')
+    return 1
+  }
+  let config: Partial<NmhConfig> = {}
+  try {
+    const loaded = await loadConfig(explicitConfig, process.cwd())
+    config = loaded.values
+    if (loaded.source !== null) verboseLog(`config: ${loaded.source}`)
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      errorLog(err.message)
+      return 1
+    }
+    throw err
+  }
+  if (config.logDir !== undefined) setLogDirectory(config.logDir)
+
+  // cac defaults the --no-color negation to color:true even when nobody passed it,
+  // so "explicit --color on the CLI" is detected from argv, not from flags.color.
+  const cliColorExplicit = process.argv.includes('--color') || process.argv.includes('--color=true')
   configureLogger({
     verbose: flags.verbose === true,
     quiet: flags.quiet === true,
-    noColor: flags.noColor === true || flags.color === false,
+    noColor:
+      flags.noColor === true ||
+      flags.color === false || // explicit CLI --no-color wins over config
+      (config.color === false && !cliColorExplicit),
   })
 
   for (const future of detectFutureFlags(Object.keys(flags))) {
@@ -117,6 +147,11 @@ async function main(): Promise<number> {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
     return 1
   }
+  // .nmhrc defaultMode fills in a bare `--delete` (no explicit mode on the CLI)
+  if (deleted.mode === null && deleted.given && config.defaultMode !== undefined) {
+    deleted.mode = config.defaultMode
+    verboseLog(`delete mode from .nmhrc: ${deleted.mode}`)
+  }
 
   const pm = normalizePm(flags.pm)
   if (pm === 'invalid') {
@@ -132,11 +167,12 @@ async function main(): Promise<number> {
 
   const recursive = flags.recursive === true
   const expand = flags.expand === true
-  const excludes = splitTargets(flags.exclude as string | string[] | undefined)
-  const keep = splitTargets(flags.keep as string | string[] | undefined)
+  const excludes = [...(config.exclude ?? []), ...splitTargets(flags.exclude as string | string[] | undefined)]
+  const keep = [...(config.keep ?? []), ...splitTargets(flags.keep as string | string[] | undefined)]
+  const effectiveDepth = depth ?? config.depth ?? undefined
 
   const cwd = process.cwd()
-  const json = flags.json === true
+  const json = flags.json === true || (Array.isArray(flags.json) && flags.json.includes(true))
   const dryRun = flags.dryRun === true
   const assumeYes = flags.yes === true || flags.force === true
 
@@ -156,7 +192,7 @@ async function main(): Promise<number> {
     cwd,
     json,
     sizeMode,
-    maxDepth: depth ?? undefined,
+    maxDepth: effectiveDepth,
     recursive,
     excludes: excludes.length > 0 ? excludes : undefined,
     keep: keep.length > 0 ? keep : undefined,
@@ -193,7 +229,7 @@ async function main(): Promise<number> {
       targets: searchTargets,
       cwd,
       json,
-      maxDepth: depth ?? undefined,
+      maxDepth: effectiveDepth,
       recursive,
       excludes: excludes.length > 0 ? excludes : undefined,
       keep: keep.length > 0 ? keep : undefined,
@@ -251,7 +287,7 @@ async function main(): Promise<number> {
       tree: treeGiven,
       depend: dependGiven,
       dependPkg,
-      maxDepth: depth ?? undefined,
+      maxDepth: effectiveDepth,
       recursive,
       excludes: excludes.length > 0 ? excludes : undefined,
       keep: keep.length > 0 ? keep : undefined,
@@ -277,7 +313,7 @@ async function main(): Promise<number> {
       tree: treeGiven,
       topN: topN ?? undefined,
       by: by ?? undefined,
-      maxDepth: depth ?? undefined,
+      maxDepth: effectiveDepth,
       recursive,
       excludes: excludes.length > 0 ? excludes : undefined,
       keep: keep.length > 0 ? keep : undefined,
@@ -307,7 +343,7 @@ async function main(): Promise<number> {
       excludes: excludes.length > 0 ? excludes : undefined,
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
-      maxDepth: depth ?? undefined,
+      maxDepth: effectiveDepth,
     })
   }
 
@@ -324,7 +360,7 @@ async function main(): Promise<number> {
       excludes: excludes.length > 0 ? excludes : undefined,
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
-      maxDepth: depth ?? undefined,
+      maxDepth: effectiveDepth,
     })
   }
 
@@ -335,7 +371,7 @@ async function main(): Promise<number> {
   }
 
   // totally bare: wizard (TTY) / read-only scan (non-TTY, never hangs)
-  return runWizard(cwd)
+  return runWizard(cwd, { defaultMode: config.defaultMode })
 }
 
 main()

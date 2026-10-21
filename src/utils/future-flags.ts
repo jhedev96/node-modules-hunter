@@ -20,7 +20,6 @@ const FUTURE_FLAGS = new Set([
   'saveBaseline',
   'compare',
   'history',
-  'config',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */
