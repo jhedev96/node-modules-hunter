@@ -9,7 +9,6 @@ const FUTURE_FLAGS = new Set([
   'why',
   'depend',
   'map',
-  'search',
   'stats',
   'tree',
   'report',

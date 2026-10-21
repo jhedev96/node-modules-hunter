@@ -4,6 +4,7 @@ import { splitTargets } from './utils/paths.ts'
 import { toolVersion } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { runScan } from './commands/scan.ts'
+import { runSearch } from './commands/search.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
@@ -27,10 +28,9 @@ cli.option('--exclude <globs>', 'Exclude paths from results (comma list of globs
 cli.option('--keep <pkgs>', 'Refuse to delete node_modules of these projects (comma list, glob ok)')
 cli.option('--depth <n>', 'Max scan depth in levels below the target')
 cli.option('--expand', 'Full absolute paths + extra detail in output')
+cli.option('--search <pattern>', 'Search installed packages (substring, glob, or /regex/) — read-only')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
-
-const COMMAND_WORDS = new Set(['scan', 'clean', 'help', 'version'])
 
 function looksLikePath(text: string): boolean {
   return (
@@ -160,6 +160,38 @@ async function main(): Promise<number> {
   if (subcommand === 'version') {
     console.log(`${toolVersion()} (node ${process.version}, ${process.platform})`)
     return 0
+  }
+
+  // search: subcommand (`nmh search <pattern> [dirs]`) or flag (`--search <pattern>` on any read-only form)
+  const searchPattern =
+    typeof flags.search === 'string' && flags.search.length > 0
+      ? flags.search
+      : subcommand === 'search'
+        ? (rest[0] ?? null)
+        : null
+  if (subcommand === 'search' || searchPattern !== null) {
+    if (deleted.given || subcommand === 'clean') {
+      errorLog('--search is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    if (searchPattern === null) {
+      errorLog('search needs a pattern — nmh search <pattern> [dirs]')
+      return 1
+    }
+    const searchTargets =
+      subcommand === 'search' ? [...rest.slice(1), ...dirTargets] : targets
+    return runSearch({
+      pattern: searchPattern,
+      targets: searchTargets,
+      cwd,
+      json,
+      maxDepth: depth ?? undefined,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      expand,
+    })
   }
 
   if (subcommand === 'scan') {

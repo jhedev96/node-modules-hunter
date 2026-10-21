@@ -29,6 +29,30 @@ export interface ScanEntry {
   ownerPath?: string
 }
 
+export interface SearchMatch {
+  name: string
+  version: string | null
+  /** Directory size of the matched package folder (bytes, real files only). */
+  size: number
+  path: string
+  symlinked: boolean
+}
+
+export interface SearchEntryResult {
+  entry: ScanEntry
+  /** True when the pattern matched the node_modules path itself (even with no package hits). */
+  pathMatch: boolean
+  matches: SearchMatch[]
+}
+
+export interface SearchOutcome {
+  /** 0 matches found, 2 nothing matched, 4 partial permission issues. */
+  code: number
+  pattern: string
+  results: SearchEntryResult[]
+  permissionIssues: string[]
+}
+
 export interface ScanTotals {
   folders: number
   size: number
