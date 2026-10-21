@@ -33,6 +33,8 @@ nmh scan [dir]                     # full scan (default: cwd)
 nmh clean [dir]                    # scan + delete everything safe (trash by default)
 nmh search <pattern> [dir…]        # find installed packages by name (+ versions & sizes)
 nmh map [dir]                      # project → PM → size → top packages → declared deps
+nmh stats [dir]                    # size analytics: dup factor, waste size, top-N, per-package tree
+nmh stats -g                       # global installs across npm/pnpm/yarn/bun — read-only analysis
 
 nmh --dir=A,B,glob/*/node_modules  # targets: comma list, globs, ~ — combine with flags below
 nmh version | --version | -v
@@ -58,6 +60,12 @@ Search patterns: plain text is a case-insensitive substring (`nmh search lodash`
 | `--search <pattern>` | Same as the `search` command, mixed into any read-only form (`nmh --dir=X --search lodash`) |
 | `-m, --map [--tree]` | Project map table; `--tree` lists package names per project |
 | `--depend [pkg]` | With `map`: show declared deps per project; with a value, list which projects declare it |
+| `--stats` | Size analytics: instances vs unique names, duplication factor, dedupable waste, top-N list |
+| `--tree` / `--top <n>` / `--by size` | With `stats`: per-package size tree / row count (default 10) / breakdown mode (`type` lands in v0.4) |
+| `-g, --global` | With `stats`: analyze the global installs of npm/pnpm/yarn/bun (per-PM prefix scan, cross-PM duplicates, dead bin symlinks — read-only) |
+| `--save-report <file>` / `--report <file>` | scan only: **also** write the printed report to a file — format picked by extension `.json` / `.md` / `.txt` |
+| `--animate` / `--no-animate` | Live size counter while measuring: auto = real TTY only, `--animate` forces it even when piped; always suppressed under `--json`; `.nmhrc animate:false` mutes it |
+| `--config <file>` | Use this config file instead of the `.nmhrc` lookup (cwd → `$HOME`) |
 | `--json` | Machine-readable output (pipe into `jq`) |
 | `-q/--quiet`, `--verbose`, `--no-color` | Output control |
 
@@ -78,6 +86,50 @@ $ nmh --dir=./my-repo/packages/*/node_modules --delete=hard --dry-run
   ✗ ./packages/web/node_modules (1.2 GB, pnpm)
   …
 Run again without --dry-run to execute.
+```
+
+### Size analytics (v0.3)
+
+```bash
+$ nmh stats ./my-repo
+📊 nmh stats — 2 node_modules · dedup potential detected
+
+━━━ OVERVIEW ━━━
+Total size        : 11.4 KB across 2 node_modules
+Packages          : 4 instances / 3 unique (dup 1.3×)
+Waste (dedupable) : 3.7 KB (32.9% of package sizes)
+
+━━━ TOP 10 SIZE ━━━
+ 1. lodash  ×2 copies  7.7 KB   ← dedup bisa hemat 3.7 KB
+ 2. moment  ×1 copy  2.5 KB
+
+$ nmh stats ./my-repo --tree        # per-package sizes inside each node_modules (PM column: — = unknown)
+web · ./web/node_modules · — · 6.4 KB
+  ├─ lodash@4.17.21 (3.9 KB)
+  └─ moment@2.29.4 (2.5 KB)
+
+$ nmh stats -g                      # every global install, per package manager
+🌐 nmh stats — global installation analysis
+(⚠️ global mode — read-only; needs access to the PM prefixes — sudo is never auto-applied)
+
+PM detected      : npm  (not found: pnpm, yarn, bun)
+Total global     : 2 packages — 11.8 KB
+
+┌────────────┬─────────┬────────┬─────┐
+│ Package    │ Version │ Size   │ PM  │
+├────────────┼─────────┼────────┼─────┤
+│ @acme/beta │ 2.3.4   │ 3.0 KB │ npm │
+│ alpha      │ 1.0.0   │ 8.8 KB │ npm │
+└────────────┴─────────┴────────┴─────┘
+⚠ dead globals in npm: 1 (broken/missing bin symlink)
+  - alpha → alpha (missing bin symlink)
+```
+
+Stats rank the same package across many `node_modules` folders, so `dupFactor` grows with copies; "waste" counts only **exact-same-version** duplicates minus one copy each (never mind-measured, symlink-safe). `stats -g` discovers each PM's real global prefix (`npm root -g`, `pnpm root -g`, `yarn global dir`, `bun pm -g` with fallback paths), stays top-level-only and read-only, and flags packages whose declared `bin` commands are missing/broken in the global bin dir.
+
+```bash
+$ nmh scan ./my-repo --save-report report.md   # table on screen + file copy (also --report, .json/.md/.txt)
+ℹ 💾 report saved → report.md (md)
 ```
 
 ## Safety first (the whole point)
@@ -139,9 +191,30 @@ $ nmh map ./my-repo --tree          # package names per project
 $ nmh map ./my-repo --depend vite   # who declares vite? (declared level)
 ```
 
+## Config file (.nmhrc)
+
+For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your project or in `$HOME`:
+
+```json
+{
+  "depth": 4,
+  "exclude": ["**/e2e/**", "**/.cache/**"],
+  "keep": ["my-fragile-app"],
+  "defaultMode": "trash",
+  "color": true,
+  "animate": false,
+  "logDir": "~/.cache/nmh-logs"
+}
+```
+
+- Nearest file wins: looks from the current dir up **to** `$HOME` (inclusive), not beyond.
+- `--config <file>` replaces the lookup entirely.
+- CLI flags always win; `exclude`/`keep` **merge** (config first, CLI appended); `defaultMode` pre-fills a bare `--delete` and the wizard's initial choice; unknown keys are warned about and ignored.
+- `--config` isn't a delete-mode switch — deleting still asks permission unless `--yes`/`--force`.
+
 ## Roadmap
 
-v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 adds **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): `stats` analysis suite (dup factor, waste size, scores, licenses), per-package size breakdown in tree, global installs, config file, report export.
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 adds the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): lockfile-aware dedup suggestions, `--why`, baselines & `--compare` (v0.4); health score, license scan, treemap export (v0.5).
 
 ## Development
 
