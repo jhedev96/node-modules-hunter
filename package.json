@@ -1,0 +1,51 @@
+{
+  "name": "node-modules-hunter",
+  "version": "0.1.0",
+  "description": "Hunt down bloated node_modules folders across your machine — scan, measure, and clean them with one command.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "nmh": "dist/cli.js",
+    "node-modules-hunter": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "node_modules",
+    "cleanup",
+    "disk-space",
+    "cli",
+    "monorepo",
+    "npm",
+    "pnpm",
+    "yarn",
+    "bun",
+    "trash",
+    "devtools"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "cac": "^6.7.14",
+    "cli-table3": "^0.6.5",
+    "picocolors": "^1.1.1",
+    "tinyglobby": "^0.2.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
