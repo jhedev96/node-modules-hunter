@@ -112,7 +112,7 @@ async function fileExists(p: string): Promise<boolean> {
 /** `pnpm@10.4.1+sha512.x` → 'pnpm'; `@scope/pm@1.0.0` → '@scope/pm'; garbage → null. */
 export function pmFromField(value: string | undefined): Exclude<PMFamily, 'unknown'> | null {
   if (typeof value !== 'string' || value.length === 0) return null
-  const at = value.lastIndexOf('@', value.startsWith('@') ? 1 : 0)
+  const at = value.lastIndexOf('@')
   const name = at > 0 ? value.slice(0, at) : value
   return knownFamily(name)
 }
