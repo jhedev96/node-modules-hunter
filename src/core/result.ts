@@ -95,8 +95,7 @@ export interface StatsPackageGroup {
 }
 
 export interface StatsOverview {
-  /** Total size of scanned node_modules (top-level only — matches `--size total`). */
-  totalSize: number
+  /** Total size of scanned node_modules (top-level only — matches `--size total`). */  totalSize: number
   entryCount: number
   /** Installed package instances (= top-level dirs across entries, nested included when scanned). */
   instances: number
@@ -112,6 +111,34 @@ export interface StatsOverview {
   declared: number | null
 }
 
+/** One physical copy inside a dup group (PRD §8.2 dedup suggestion). */
+export interface DedupInstanceDetail {
+  /** Display path of the hosting node_modules (`./api/node_modules`). */
+  displayPath: string
+  /** PM family of the hosting entry ('npm' | 'pnpm' | ...). */
+  pm: string
+  version: string | null
+  /** Bytes for real dirs; null for symlinked instances. */
+  size: number | null
+  /** Manifest project that declares it (name), null when no manifest declares the name. */
+  projectName: string | null
+  /** Raw manifest value, e.g. `^4.17.0` — null when the copy arrives transitively. */
+  declaredRange: string | null
+  /** dependencies | devDependencies | optionalDependencies | peerDependencies. */
+  declaredField: string | null
+}
+
+export interface DedupSuggestion {
+  name: string
+  /** The shared exact version of all copies in the group (dedup only merges identical versions). */
+  version: string | null
+  /** Bytes recoverable by keeping one copy (copies − 1 × median size). */
+  save: number
+  /** How a duplicate fold is suggested, based on the declared ranges of the copies. */
+  hint: string
+  instances: DedupInstanceDetail[]
+}
+
 export interface StatsOutcome {
   /** 0 report produced, 2 nothing found, 4 partial permission issues. */
   code: number
@@ -119,6 +146,8 @@ export interface StatsOutcome {
   overview: StatsOverview
   /** Groups sorted by totalSize desc. */
   sizeGroups: StatsPackageGroup[]
+  /** Top identical-version dup groups with per-copy declared ranges (suggestion fuel). */
+  dedupSuggestions: DedupSuggestion[]
   permissionIssues: string[]
 }
 

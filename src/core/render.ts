@@ -493,6 +493,24 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
+  if (outcome.dedupSuggestions.length > 0) {
+    lines.push('')
+    lines.push(`━━━ ${colors.bold('DEDUP SUGGESTION')} ━━━`)
+    outcome.dedupSuggestions.forEach((suggestion, index) => {
+      const rank = String(index + 1).padStart(2)
+      const version = suggestion.version !== null ? `@${suggestion.version}` : ''
+      lines.push(`${rank}. ${colors.bold(suggestion.name + version)}  ${dim(`×${suggestion.instances.length} copies`)}  ${colors.yellow(signedBytes(suggestion.save))}${dim(' bisa hemat')}`)
+      for (const inst of suggestion.instances) {
+        const declared =
+          inst.projectName !== null && inst.declaredRange !== null
+            ? `${inst.projectName} declared ${inst.declaredRange} (${inst.declaredField})`
+            : 'transitive (tidak dideklarasi di manifest)'
+        lines.push(`    · ${inst.displayPath} (${inst.pm}) · ${formatBytes(inst.size ?? 0)} · ${declared}`)
+      }
+      lines.push(`    ${dim(`↳ ${suggestion.hint}`)}`)
+    })
+  }
+
   if (outcome.permissionIssues.length > 0) {
     lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`))
   }
@@ -512,6 +530,7 @@ export function renderStatsJson(
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
     sizeGroups: outcome.sizeGroups,
+    dedupSuggestions: outcome.dedupSuggestions,
     projects: outcome.projects.map((project) => ({
       project: project.project,
       path: project.entry.path,

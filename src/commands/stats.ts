@@ -12,10 +12,10 @@ import {
 } from '../utils/baseline.ts'
 import { toolVersion } from '../utils/version.ts'
 import { collectScan } from './scan.ts'
-import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
+import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor, depSpecFor, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
-import type { MapProjectInfo, StatsOutcome, StatsPackageGroup } from '../core/result.ts'
+import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsOutcome, StatsPackageGroup } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -100,6 +100,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   // each name group by exact version to estimate dedup-able waste.
   const byName = new Map<string, StatsPackageGroup>()
   const versionsByName = new Map<string, Map<string, number[]>>()
+  const members = new Map<string, Map<string, MemberRef[]>>()
   let pkgSizeTotal = 0
   let declaredSum = 0
   let projectsWithManifest = 0
@@ -120,6 +121,13 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
         sizes.push(pkg.size)
         versions.set(pkg.version ?? '(no version)', sizes)
         versionsByName.set(pkg.name, versions)
+        // duplicate-suggestion members, per (name, exact version) — sized instances only
+        const key = pkg.version ?? '(no version)'
+        const nameMembers = members.get(pkg.name) ?? new Map<string, MemberRef[]>()
+        const list = nameMembers.get(key) ?? []
+        list.push({ ref: pkg, entryPath: project.entry.path, displayPath: project.entry.displayPath, pm: project.entry.pm.family })
+        nameMembers.set(key, list)
+        members.set(pkg.name, nameMembers)
       }
       byName.set(pkg.name, group)
     }
@@ -140,6 +148,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   }
 
   const sizeGroups = [...byName.values()].sort((a, b) => b.totalSize - a.totalSize || a.name.localeCompare(b.name))
+  const dedupSuggestions = await buildSuggestions(members)
 
   const instances = sizeGroups.reduce((sum, group) => sum + group.copies, 0)
   let unique = 0
@@ -161,7 +170,67 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, permissionIssues: scan.result.permissionIssues }
+}
+
+/** Enough to find an instance's hosting entry + manifest again when building suggestions. */
+interface MemberRef {
+  ref: MapPackageRef
+  entryPath: string
+  displayPath: string
+  pm: string
+}
+
+/** Identical-version groups ≥2 copies, ranked by save (PRD §8.2 dedup suggestion), top 5. */
+async function buildSuggestions(members: Map<string, Map<string, MemberRef[]>>): Promise<DedupSuggestion[]> {
+  const specCache = new Map<string, DepSpec | null>()
+  const suggestions: DedupSuggestion[] = []
+  for (const [name, byVersion] of members) {
+    for (const [key, list] of byVersion) {
+      if (list.length < 2) continue
+      const sizes = list.map((member) => member.ref.size ?? 0).sort((a, b) => a - b)
+      const median = sizes[Math.floor((sizes.length - 1) / 2)]
+      const save = (sizes.length - 1) * median
+      if (save <= 0) continue
+      const instances = await Promise.all(
+        list.map(async (member): Promise<DedupInstanceDetail> => {
+          const cacheKey = `${member.entryPath}\u0000${name}`
+          let spec = specCache.get(cacheKey)
+          if (spec === undefined) {
+            spec = await depSpecFor(member.entryPath, name)
+            specCache.set(cacheKey, spec)
+          }
+          return {
+            displayPath: member.displayPath,
+            pm: member.pm,
+            version: member.ref.version,
+            size: member.ref.size,
+            projectName: spec?.projectName ?? null,
+            declaredRange: spec?.range ?? null,
+            declaredField: spec?.field ?? null,
+          }
+        }),
+      )
+      suggestions.push({ name, version: key === '(no version)' ? null : key, save, hint: dedupHint(instances), instances })
+    }
+  }
+  suggestions.sort((a, b) => b.save - a.save || a.name.localeCompare(b.name))
+  return suggestions.slice(0, 5)
+}
+
+function dedupHint(instances: DedupInstanceDetail[]): string {
+  const declared = instances.filter((inst) => inst.declaredRange !== null)
+  if (declared.length === 0) {
+    return 'copies resolusinya ikut parent masing-masing — tidak ada knob langsung di project level'
+  }
+  const ranges = [...new Set(declared.map((inst) => inst.declaredRange))].filter((range) => range !== null)
+  if (ranges.length === 1) {
+    const tail = ` (declared ${ranges[0]})`
+    return instances.some((inst) => inst.pm === 'pnpm')
+      ? `range declared identik — pnpm virtual store melipat copy hoisted; cukup satu versi di workspace root${tail}`
+      : `range declared identik — jalankan install ulang / npm dedupe · yarn dedupe melipat copy hoisted${tail}`
+  }
+  return `range declared beda (${ranges.join(' vs ')}) — samakan dulu di package.json, lalu install ulang`
 }
 
 /** Stats + print (report / tree / JSON), with optional baseline save/compare/history (PRD §8.3). */

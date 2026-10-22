@@ -14,6 +14,7 @@ export interface LoosePackageJson {
   peerDependencies?: Record<string, unknown>
   /** npm-style bin declaration: 'cli.js' | { name: file, ... } */
   bin?: string | Record<string, string>
+  optionalDependencies?: Record<string, unknown>
 }
 
 export async function readPackageJson(dir: string): Promise<LoosePackageJson | null> {
@@ -119,6 +120,46 @@ export async function listTopLevelPackages(entryPath: string): Promise<PackageRe
 export async function packageVersion(pkgPath: string): Promise<string | null> {
   const pkg = await readPackageJson(pkgPath)
   return typeof pkg?.version === 'string' ? pkg.version : null
+}
+
+export interface DepSpec {
+  /** The raw manifest value, e.g. `^4.17.0` or `npm:lodash@5`. */
+  range: string
+  /** Which dependency field declares it: dependencies | devDependencies | optionalDependencies | peerDependencies. */
+  field: string
+  /** Manifest directory that declares it (first hit on the climb). */
+  projectDir: string
+  projectName: string | null
+}
+
+const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
+
+/**
+ * Where + how a specific package name is declared around an entry (PRD §8.2 dedup
+ * suggestion): nearest manifest on the climb wins, checked per dep field.
+ */
+export async function depSpecFor(entryPath: string, pkgName: string): Promise<DepSpec | null> {
+  let dir = path.dirname(entryPath)
+  for (let hop = 0; hop < MAX_CLIMB; hop += 1) {
+    const pkg = await readPackageJson(dir)
+    if (pkg) {
+      for (const field of DEP_FIELDS) {
+        const range = (pkg[field] as Record<string, unknown> | undefined)?.[pkgName]
+        if (typeof range === 'string') {
+          return {
+            range,
+            field,
+            projectDir: dir,
+            projectName: typeof pkg.name === 'string' ? pkg.name : null,
+          }
+        }
+      }
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) return null
+    dir = parent
+  }
+  return null
 }
 
 export interface ProjectDeps {
