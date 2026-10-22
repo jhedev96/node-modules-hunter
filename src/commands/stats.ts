@@ -11,6 +11,8 @@ import {
   type BaselineComparison,
 } from '../utils/baseline.ts'
 import { toolVersion } from '../utils/version.ts'
+import { collectDepsAudit } from '../core/deps-audit.ts'
+import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor, depSpecFor, createDepClassifier, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
@@ -39,6 +41,10 @@ export interface StatsRequest {
   compareBaseline?: string
   /** --history: just list stored baselines (no scan at all). */
   history?: boolean
+  /** --phantom: audit imports found in sources but declared in no manifest (best-effort). */
+  phantom?: boolean
+  /** --dead: audit installed+declared packages never imported (best-effort). */
+  dead?: boolean
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
@@ -153,6 +159,18 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   // --by type: classify every installed instance by its declaring dep field (cached manifests)
   const typeBreakdown = request.by === 'type' ? await buildTypeBreakdown(projectsResults) : []
 
+  // --phantom/--dead: best-effort import audit over the enclosing project dirs
+  const depsAudit =
+    request.phantom === true || request.dead === true
+      ? await collectDepsAudit(
+          projectsResults.map((project) => ({
+            dir: project.declared?.projectDir ?? path.dirname(project.entry.path),
+            projectName: project.declared?.name ?? null,
+          })),
+          new Set(projectsResults.flatMap((project) => project.topPackages.map((pkg) => pkg.name))),
+        )
+      : null
+
   const instances = sizeGroups.reduce((sum, group) => sum + group.copies, 0)
   let unique = 0
   for (const versions of versionsByName.values()) unique += versions.size
@@ -173,7 +191,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, depsAudit, permissionIssues: scan.result.permissionIssues }
 }
 
 /**
@@ -349,9 +367,20 @@ export async function runStats(request: StatsRequest): Promise<number> {
     expand: request.expand === true,
     topN: request.topN ?? 10,
     by: request.by ?? null,
+    audit: auditFocus(request),
   }))
   if (comparison !== null) log(renderBaselineCompare(comparison))
   return outcome.code
+}
+
+/** which halves of the deps audit to show for this run (PRD §8.1 focused flags). */
+export function auditFocus(request: { phantom?: boolean; dead?: boolean }): 'phantom' | 'dead' | 'both' | null {
+  const phantom = request.phantom === true
+  const dead = request.dead === true
+  if (phantom && dead) return 'both'
+  if (phantom) return 'phantom'
+  if (dead) return 'dead'
+  return null
 }
 
 /** Baseline write failures are surfaced non-fatally: the report itself already printed. */

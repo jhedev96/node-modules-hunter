@@ -10,8 +10,6 @@ const FUTURE_FLAGS = new Set([
   'co2',
   'score',
   'licenses',
-  'phantom',
-  'dead',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */

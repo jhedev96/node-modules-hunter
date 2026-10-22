@@ -54,6 +54,8 @@ cli.option('--save-baseline <name>', 'stats only: save a metadata snapshot of th
 cli.option('--compare <name>', 'stats only: diff this run against a stored baseline (totals, per-node_modules, package movers)')
 cli.option('--history', 'stats only: list stored baselines — no scan at all')
 cli.option('--why <pkg>', 'read-only: explain an installed package — instances, declaring manifest, which siblings require it')
+cli.option('--phantom', 'stats only: imports found in project sources but declared nowhere (best-effort regex audit)')
+cli.option('--dead', 'stats only: installed packages declared (outside peer) but never imported (best-effort regex audit)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -404,6 +406,10 @@ async function main(): Promise<number> {
     errorLog('--save-baseline/--compare/--history only work with the stats command — nmh stats --save-baseline <name>')
     return 1
   }
+  if ((flags.phantom === true || flags.dead === true) && !statsGiven) {
+    errorLog('--phantom/--dead only work with the stats command — nmh stats --dead')
+    return 1
+  }
   if (statsGiven) {
     if (deleted.given || subcommand === 'clean') {
       errorLog('--stats is read-only — combine it with scan, not with delete/clean')
@@ -446,6 +452,8 @@ async function main(): Promise<number> {
       saveBaseline: baselineSave ?? undefined,
       compareBaseline: baselineCompare ?? undefined,
       history: baselineHistory,
+      phantom: flags.phantom === true,
+      dead: flags.dead === true,
     })
   }
   if (flags.top !== undefined || by !== null) {

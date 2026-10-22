@@ -150,6 +150,8 @@ export interface StatsOutcome {
   dedupSuggestions: DedupSuggestion[]
   /** --by type: per dependency-field size/count buckets (empty on other modes). */
   typeBreakdown: StatsTypeBreakdown[]
+  /** --phantom/--dead: best-effort import audit; null when the flags are absent. */
+  depsAudit: DepsAudit | null
   permissionIssues: string[]
 }
 
@@ -180,6 +182,21 @@ export interface WhyOutcome {
   pkg: string
   instances: WhyInstanceInfo[]
   permissionIssues: string[]
+}
+
+/** One phantom/dead row (PRD §8.2, best-effort regex audit — keputusan #7). */
+export interface DepsAuditHit {
+  name: string
+  /** Up to 3 project-relative file paths where it is imported (phantom only). */
+  sites: string[]
+  /** Declaring manifests as `name (field)` (dead only). */
+  declaringProjects: string[]
+}
+
+export interface DepsAudit {
+  scannedFiles: number
+  phantom: DepsAuditHit[]
+  dead: DepsAuditHit[]
 }
 
 export interface GlobalBinIssue {

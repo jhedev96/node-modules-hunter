@@ -8,6 +8,7 @@ import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
 import type {
   DeleteMode,
   DeleteOutcome,
+  DepsAudit,
   GlobalDuplicate,
   GlobalOutcome,
   GlobalPmReport,
@@ -450,6 +451,8 @@ export interface RenderStatsOptions {
   expand?: boolean
   topN: number
   by: 'package' | 'size' | 'type' | null
+  /** --phantom/--dead focus: which halves of the audit to show. */
+  audit?: 'phantom' | 'dead' | 'both' | null
 }
 
 function projectBadges(projects: MapProjectInfo[]): string {
@@ -483,7 +486,14 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
-  const top = options.by === 'type' ? [] : outcome.sizeGroups.slice(0, options.topN)
+  const focused = options.by === 'type' || (options.audit ?? null) !== null
+
+  if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
+    lines.push('')
+    lines.push(renderDepsAudit(outcome.depsAudit, options.audit ?? 'both'))
+  }
+
+  const top = options.by === 'type' || focused ? [] : outcome.sizeGroups.slice(0, options.topN)
   if (top.length > 0) {
     lines.push('')
     lines.push(`━━━ ${colors.bold(`TOP ${options.topN} SIZE`)} ━━━`)
@@ -506,7 +516,7 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
-  if (outcome.dedupSuggestions.length > 0) {
+  if (!focused && outcome.dedupSuggestions.length > 0) {
     lines.push('')
     lines.push(`━━━ ${colors.bold('DEDUP SUGGESTION')} ━━━`)
     outcome.dedupSuggestions.forEach((suggestion, index) => {
@@ -545,6 +555,7 @@ export function renderStatsJson(
     sizeGroups: outcome.sizeGroups,
     dedupSuggestions: outcome.dedupSuggestions,
     typeBreakdown: outcome.typeBreakdown,
+    depsAudit: outcome.depsAudit,
     projects: outcome.projects.map((project) => ({
       project: project.project,
       path: project.entry.path,
@@ -797,4 +808,29 @@ export function renderWhyJson(outcome: WhyOutcome, _request: { cwd: string }): s
     null,
     2,
   )
+}
+
+export function renderDepsAudit(audit: DepsAudit, focus: 'phantom' | 'dead' | 'both'): string {
+  const lines: string[] = []
+  lines.push(`━━━ ${colors.bold('DEPS AUDIT')} ━━━`)
+  lines.push(colors.dim(`· best-effort regex scan — ${audit.scannedFiles} source file(s) (lockfile graph lands later)`))
+  const showPhantom = focus === 'phantom' || focus === 'both'
+  const showDead = focus === 'dead' || focus === 'both'
+  if (showPhantom && audit.phantom.length === 0 && showDead && audit.dead.length === 0) {
+    lines.push(colors.green('✓ no phantom imports and no dead declarations detected'))
+  }
+  if (showPhantom && audit.phantom.length > 0) {
+    lines.push(`🧟 phantom imports — imported in code, declared nowhere (${audit.phantom.length})`)
+    for (const hit of audit.phantom) {
+      const sites = hit.sites.length > 0 ? colors.dim(` — ${hit.sites.join(', ')}`) : ''
+      lines.push(`  · ${colors.bold(hit.name)}${sites}`)
+    }
+  }
+  if (showDead && audit.dead.length > 0) {
+    lines.push(`🪦 dead declarations — installed + declared, never imported (${audit.dead.length})`)
+    for (const hit of audit.dead) {
+      lines.push(`  · ${colors.bold(hit.name)} — ${hit.declaringProjects.join(', ')}`)
+    }
+  }
+  return lines.join('\n')
 }
