@@ -450,7 +450,9 @@ export interface RenderStatsOptions {
   cwd: string
   expand?: boolean
   topN: number
-  by: 'package' | 'size' | 'type' | null
+  by: 'package' | 'size' | 'type' | 'licenses' | null
+  /** --licenses (or --by licenses): show + focus the LICENSES section. */
+  licenses?: boolean
   /** --phantom/--dead focus: which halves of the audit to show. */
   audit?: 'phantom' | 'dead' | 'both' | null
 }
@@ -486,7 +488,25 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
-  const focused = options.by === 'type' || (options.audit ?? null) !== null
+  if (options.by === 'licenses' || options.licenses === true) {
+    // focused view (§8.1/§8.2): overview + LICENSES only
+    lines.push('')
+    lines.push(`━━━ ${colors.bold('LICENSES')} ━━━`)
+    if (outcome.licenseBreakdown.length === 0) {
+      lines.push(colors.dim('no package manifests found — nothing to license'))
+    }
+    for (const row of outcome.licenseBreakdown) {
+      const marker =
+        row.production && row.copyleft
+          ? colors.yellow('  ⚠ copyleft di production dependencies')
+          : row.copyleft
+            ? colors.dim('  (copyleft, bukan prod-dep)')
+            : ''
+      lines.push(`${row.type.padEnd(24)}: ${formatBytes(row.size)} · ${row.packages} pkg${marker}`)
+    }
+  }
+
+  const focused = options.by === 'type' || options.by === 'licenses' || options.licenses === true || (options.audit ?? null) !== null
 
   if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
     lines.push('')
@@ -542,19 +562,20 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
 
 export function renderStatsJson(
   outcome: StatsOutcome,
-  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' },
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean },
   extra?: { baseline?: BaselineJsonExtra },
 ): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? 'report',    topN: request.topN ?? 10,
+    mode: request.tree === true ? 'tree' : request.by ?? (request.licenses === true ? 'licenses' : 'report'),
     baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
     sizeGroups: outcome.sizeGroups,
     dedupSuggestions: outcome.dedupSuggestions,
     typeBreakdown: outcome.typeBreakdown,
+    licenseBreakdown: outcome.licenseBreakdown,
     depsAudit: outcome.depsAudit,
     projects: outcome.projects.map((project) => ({
       project: project.project,

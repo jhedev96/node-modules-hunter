@@ -15,6 +15,42 @@ export interface LoosePackageJson {
   /** npm-style bin declaration: 'cli.js' | { name: file, ... } */
   bin?: string | Record<string, string>
   optionalDependencies?: Record<string, unknown>
+  /** License field in any of its historical shapes: 'MIT' | {type} | [{type}] */
+  license?: string | { type?: string; name?: string } | Array<{ type?: string; name?: string }>
+  licenses?: Array<{ type?: string; name?: string }>
+}
+
+/** Normalize every historical `license` shape to a single type string, null when absent. */
+export function licenseOf(manifest: LoosePackageJson | null): string | null {
+  if (manifest === null) return null
+  const pick = (value: unknown): string | null => {
+    if (typeof value === 'string') return value.trim().length > 0 ? value.trim() : null
+    if (typeof value === 'object' && value !== null) {
+      const record = value as { type?: unknown; name?: unknown }
+      if (typeof record.type === 'string' && record.type.trim().length > 0) return record.type.trim()
+      if (typeof record.name === 'string' && record.name.trim().length > 0) return record.name.trim()
+    }
+    return null
+  }
+  const direct = pick(manifest.license)
+  if (direct !== null) return direct
+  if (Array.isArray(manifest.licenses)) {
+    for (const entry of manifest.licenses) {
+      const found = pick(entry)
+      if (found !== null) return found
+    }
+  }
+  return null
+}
+
+/** Copyleft family sniff for the ⚠ flag (PRD §8.2 license summary). */
+export function isCopyleftLicense(type: string): boolean {
+  const upper = type.toUpperCase()
+  return /(^|\W)(LGPL|AGPL|GPL|MPL)(\W|$)/.test(upper) || upper.includes('GNU GENERAL PUBLIC')
+}
+
+export async function readLicense(pkgDir: string): Promise<string | null> {
+  return licenseOf(await readPackageJson(pkgDir))
 }
 
 export async function readPackageJson(dir: string): Promise<LoosePackageJson | null> {

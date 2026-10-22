@@ -59,6 +59,8 @@ export interface MapPackageRef {
   symlinked: boolean
   /** Directory size in bytes for real package dirs; null for symlinked packages / not requested. */
   size: number | null
+  /** Normalized license field of the instance when stats measured it (stats-only byproduct). */
+  license?: string | null
 }
 
 export interface MapDeclared {
@@ -150,6 +152,8 @@ export interface StatsOutcome {
   dedupSuggestions: DedupSuggestion[]
   /** --by type: per dependency-field size/count buckets (empty on other modes). */
   typeBreakdown: StatsTypeBreakdown[]
+  /** --licenses: per-license buckets (empty when the flag is absent). */
+  licenseBreakdown: StatsLicenseRow[]
   /** --phantom/--dead: best-effort import audit; null when the flags are absent. */
   depsAudit: DepsAudit | null
   permissionIssues: string[]
@@ -161,6 +165,20 @@ export interface StatsTypeBreakdown {
   /** Sum of instance sizes in this bucket (symlinked instances are sizeless). */
   size: number
   packages: number
+}
+
+/** One license bucket (PRD §8.2 license summary). */
+export interface StatsLicenseRow {
+  /** Normalized license type string; 'unknown' when no usable field. */
+  type: string
+  /** Instances carrying this license. */
+  packages: number
+  /** Σ sizes of those instances (symlinked sizeless). */
+  size: number
+  /** True when at least one instance is declared in production dependencies. */
+  production: boolean
+  /** True when the type looks like a copyleft family (GPL/LGPL/AGPL/MPL share-alike). */
+  copyleft: boolean
 }
 
 /** One installed copy of the `--why` target. */

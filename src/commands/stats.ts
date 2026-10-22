@@ -14,10 +14,10 @@ import { toolVersion } from '../utils/version.ts'
 import { collectDepsAudit } from '../core/deps-audit.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
-import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor, depSpecFor, createDepClassifier, type DepSpec } from '../core/packages.ts'
+import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
-import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown } from '../core/result.ts'
+import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -27,8 +27,8 @@ export interface StatsRequest {
   tree?: boolean
   /** --top <n>: rows shown in the focused size list. Default 10. */
   topN?: number
-  /** --by package|type|size — `type` warns (v0.4+) and falls back to package view. */
-  by?: 'package' | 'type' | 'size'
+  /** --by package|type|size|licenses — focused views per PRD §8.1. */
+  by?: 'package' | 'type' | 'size' | 'licenses'
   maxDepth?: number
   recursive?: boolean
   excludes?: string[]
@@ -45,6 +45,8 @@ export interface StatsRequest {
   phantom?: boolean
   /** --dead: audit installed+declared packages never imported (best-effort). */
   dead?: boolean
+  /** --licenses: bucket instances by their (normalized) license field. */
+  licenses?: boolean
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
@@ -81,15 +83,16 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
         const topPackages = await Promise.all(
           refs.map((ref) =>
             pkgLimiter(async () => {
-              const [version, measure] = await Promise.all([
-                packageVersion(ref.path),
+              const [manifest, measure] = await Promise.all([
+                readPackageJson(ref.path),
                 ref.symlinked ? Promise.resolve(null) : measureEntry(ref.path),
               ])
               return {
                 name: ref.name,
-                version,
+                version: typeof manifest?.version === 'string' ? manifest.version : null,
                 symlinked: ref.symlinked,
                 size: measure === null ? null : measure.size,
+                license: licenseOf(manifest),
               }
             }),
           ),
@@ -159,6 +162,9 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   // --by type: classify every installed instance by its declaring dep field (cached manifests)
   const typeBreakdown = request.by === 'type' ? await buildTypeBreakdown(projectsResults) : []
 
+  // --licenses (flag or --by licenses): bucket instances by license field, production mixed in via the classifier
+  const licenseBreakdown = request.licenses === true || request.by === 'licenses' ? await buildLicenseBreakdown(projectsResults) : []
+
   // --phantom/--dead: best-effort import audit over the enclosing project dirs
   const depsAudit =
     request.phantom === true || request.dead === true
@@ -191,7 +197,37 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, depsAudit, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, depsAudit, permissionIssues: scan.result.permissionIssues }
+}
+
+/**
+ * --licenses (PRD §8.2): one bucket per license type across all instances.
+ * Instance size sums exclude symlinks; `production` = declared in `dependencies`;
+ * missing/unrecognizable fields land in the `unknown` bucket, sorted last.
+ */
+async function buildLicenseBreakdown(projectsResults: MapProjectInfo[]): Promise<StatsLicenseRow[]> {
+  const classify = createDepClassifier()
+  const buckets = new Map<string, { packages: number; size: number; production: boolean; copyleft: boolean }>()
+  await Promise.all(
+    projectsResults.map(async (project) => {
+      for (const pkg of project.topPackages) {
+        const type = pkg.license ?? 'unknown'
+        const hit = await classify(project.entry.path, pkg.name)
+        const production = hit?.field === 'dependencies'
+        let bucket = buckets.get(type)
+        if (bucket === undefined) {
+          bucket = { packages: 0, size: 0, production: false, copyleft: isCopyleftLicense(type) }
+          buckets.set(type, bucket)
+        }
+        bucket.packages += 1
+        if (pkg.size != null) bucket.size += pkg.size
+        bucket.production = bucket.production || production
+      }
+    }),
+  )
+  return [...buckets]
+    .map(([type, agg]) => ({ type, ...agg }))
+    .sort((a, b) => (a.type === 'unknown' ? 1 : b.type === 'unknown' ? -1 : b.packages - a.packages || a.type.localeCompare(b.type)))
 }
 
 /**
@@ -367,6 +403,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
     expand: request.expand === true,
     topN: request.topN ?? 10,
     by: request.by ?? null,
+    licenses: request.licenses === true || request.by === 'licenses',
     audit: auditFocus(request),
   }))
   if (comparison !== null) log(renderBaselineCompare(comparison))

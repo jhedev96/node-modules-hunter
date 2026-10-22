@@ -57,6 +57,7 @@ cli.option('--history', 'stats only: list stored baselines — no scan at all')
 cli.option('--why <pkg>', 'read-only: explain an installed package — instances, declaring manifest, which siblings require it')
 cli.option('--phantom', 'stats only: imports found in project sources but declared nowhere (best-effort regex audit)')
 cli.option('--dead', 'stats only: installed packages declared (outside peer) but never imported (best-effort regex audit)')
+cli.option('--licenses', 'stats only: bucket installed instances by their license field; flags copyleft in production deps')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
@@ -371,11 +372,11 @@ async function main(): Promise<number> {
     }
   }
 
-  let by: 'package' | 'type' | 'size' | null = null
+  let by: 'package' | 'type' | 'size' | 'licenses' | null = null
   if (typeof flags.by === 'string') {
-    if (flags.by === 'package' || flags.by === 'size' || flags.by === 'type') by = flags.by
+    if (flags.by === 'package' || flags.by === 'size' || flags.by === 'type' || flags.by === 'licenses') by = flags.by
     else {
-      errorLog(`invalid --by: ${flags.by} (expected 'package' | 'size'; 'type' lands in v0.4 via a focused flag)`)
+      errorLog(`invalid --by: ${flags.by} (expected 'package' | 'size' | 'type' | 'licenses')`)
       return 1
     }
   }
@@ -414,8 +415,8 @@ async function main(): Promise<number> {
     errorLog('--save-baseline/--compare/--history only work with the stats command — nmh stats --save-baseline <name>')
     return 1
   }
-  if ((flags.phantom === true || flags.dead === true) && !statsGiven) {
-    errorLog('--phantom/--dead only work with the stats command — nmh stats --dead')
+  if ((flags.phantom === true || flags.dead === true || flags.licenses === true) && !statsGiven) {
+    errorLog('--phantom/--dead/--licenses only work with the stats command — nmh stats --licenses')
     return 1
   }
   if (statsGiven) {
@@ -462,6 +463,7 @@ async function main(): Promise<number> {
       history: baselineHistory,
       phantom: flags.phantom === true,
       dead: flags.dead === true,
+      licenses: flags.licenses === true,
     })
   }
   if (flags.top !== undefined || by !== null) {
