@@ -1,9 +1,20 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog } from '../utils/logger.ts'
+import {
+  snapshotFromStats,
+  saveBaseline,
+  loadBaseline,
+  listBaselines,
+  compareBaseline,
+  validateBaselineName,
+  type BaselineSnapshot,
+  type BaselineComparison,
+} from '../utils/baseline.ts'
+import { toolVersion } from '../utils/version.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
-import { renderMapTree, renderStatsJson, renderStatsReport } from '../core/render.ts'
+import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
 import type { MapProjectInfo, StatsOutcome, StatsPackageGroup } from '../core/result.ts'
 
 export interface StatsRequest {
@@ -22,6 +33,12 @@ export interface StatsRequest {
   keep?: string[]
   pmFilter?: string[]
   expand?: boolean
+  /** --save-baseline <name>: store a metadata snapshot of this run (after comparing, when both are given). */
+  saveBaseline?: string
+  /** --compare <name>: diff this run against the stored baseline. */
+  compareBaseline?: string
+  /** --history: just list stored baselines (no scan at all). */
+  history?: boolean
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
@@ -147,13 +164,61 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   return { code, projects: projectsResults, overview, sizeGroups, permissionIssues: scan.result.permissionIssues }
 }
 
-/** Stats + print (report / tree / JSON). */
+/** Stats + print (report / tree / JSON), with optional baseline save/compare/history (PRD §8.3). */
 export async function runStats(request: StatsRequest): Promise<number> {
+  // --history needs no scan at all — the listing is the whole job
+  if (request.history === true) {
+    const items = await listBaselines()
+    if (request.json) {
+      log(JSON.stringify({ nmh: toolVersion(), command: 'stats', mode: 'baseline-history', baselines: items }, null, 2))
+      return 0
+    }
+    log(renderBaselineHistory(items, request.cwd))
+    return items.length > 0 ? 0 : 2
+  }
+
+  // save/compare names are validated & the comparison baseline loaded BEFORE scanning —
+  // both are usage errors (exit 1) if the name is bad or unknown
+  let baseForCompare: BaselineSnapshot | null = null
+  if (request.saveBaseline !== undefined) {
+    if (!validateBaselineName(request.saveBaseline)) {
+      errorLog(`invalid baseline name: '${request.saveBaseline}' (expected letters/digits/._- , max 64)`)
+      return 1
+    }
+  }
+  if (request.compareBaseline !== undefined) {
+    if (!validateBaselineName(request.compareBaseline)) {
+      errorLog(`invalid baseline name: '${request.compareBaseline}' (expected letters/digits/._- , max 64)`)
+      return 1
+    }
+    baseForCompare = await loadBaseline(request.compareBaseline)
+    if (baseForCompare === null) {
+      const names = (await listBaselines()).map((item) => item.name)
+      errorLog(
+        `no baseline named '${request.compareBaseline}' — ${
+          names.length > 0 ? `saved: ${names.join(', ')}` : 'save one first with nmh stats --save-baseline <name>'
+        }`,
+      )
+      return 1
+    }
+  }
+
   const outcome = await collectStats(request)
 
   if (outcome.projects.length === 0) {
+    // an empty scan is still an honest snapshot ("dir was clean at T0")
+    const fresh = snapshotFromStats(request.cwd, outcome)
+    let savedFile: string | null = null
+    if (request.saveBaseline !== undefined) {
+      savedFile = await saveBaselineQuiet(request.saveBaseline, fresh)
+      if (savedFile !== null) note(`💾 baseline saved → ${request.saveBaseline} (empty snapshot — no node_modules yet)`)
+    }
+    if (request.compareBaseline !== undefined) {
+      warn(`nothing to compare — no node_modules scanned; baseline '${request.compareBaseline}' kept as-is`)
+    }
     if (request.json) {
-      log(renderStatsJson(outcome, request))
+      const baselineExtra = { saved: savedFile !== null ? { name: request.saveBaseline!, createdAt: fresh.createdAt, file: savedFile } : undefined, compare: null }
+      log(renderStatsJson(outcome, request, { baseline: baselineExtra }))
       return 2
     }
     warn('no node_modules found — nothing to analyze here 🙃')
@@ -164,13 +229,27 @@ export async function runStats(request: StatsRequest): Promise<number> {
     warn("--by=type (breakdown by dependency group) lands with lockfile parsing (v0.4) — showing the size breakdown for now")
   }
 
+  const fresh = snapshotFromStats(request.cwd, outcome)
+  const comparison = baseForCompare !== null ? compareBaseline(request.compareBaseline!, baseForCompare, fresh) : null
+
+  let savedFile: string | null = null
+  if (request.saveBaseline !== undefined) {
+    savedFile = await saveBaselineQuiet(request.saveBaseline, fresh)
+    if (savedFile !== null) note(`💾 baseline saved → ${request.saveBaseline}`)
+  }
+
   if (request.json) {
-    log(renderStatsJson(outcome, request))
+    const baselineExtra = {
+      saved: savedFile !== null ? { name: request.saveBaseline!, createdAt: fresh.createdAt, file: savedFile } : undefined,
+      compare: comparison,
+    }
+    log(renderStatsJson(outcome, request, { baseline: baselineExtra }))
     return outcome.code
   }
 
   if (request.tree === true) {
     log(renderMapTree(outcome.projects, { cwd: request.cwd, expand: request.expand === true }))
+    if (comparison !== null) log(renderBaselineCompare(comparison))
     return outcome.code
   }
 
@@ -180,5 +259,16 @@ export async function runStats(request: StatsRequest): Promise<number> {
     topN: request.topN ?? 10,
     by: request.by === 'type' ? 'package' : request.by ?? null,
   }))
+  if (comparison !== null) log(renderBaselineCompare(comparison))
   return outcome.code
+}
+
+/** Baseline write failures are surfaced non-fatally: the report itself already printed. */
+async function saveBaselineQuiet(name: string, snapshot: BaselineSnapshot): Promise<string | null> {
+  try {
+    return await saveBaseline(name, snapshot)
+  } catch (err) {
+    warn(`could not save baseline '${name}': ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
 }

@@ -13,9 +13,6 @@ const FUTURE_FLAGS = new Set([
   'licenses',
   'phantom',
   'dead',
-  'saveBaseline',
-  'compare',
-  'history',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */

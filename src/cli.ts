@@ -7,6 +7,7 @@ import { detectFutureFlags } from './utils/future-flags.ts'
 import { loadConfig, ConfigError } from './utils/config.ts'
 import { setLogDirectory } from './utils/delete-log.ts'
 import { REPORT_EXTENSIONS } from './utils/report.ts'
+import { validateBaselineName } from './utils/baseline.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
 import { runMap } from './commands/map.ts'
@@ -48,6 +49,9 @@ cli.option('-g, --global', 'stats only: analyze global installs (per-PM prefix s
 cli.option('--animate/--no-animate', 'Live size counter while measuring: --animate forces it on even when piped; --no-animate mutes it (auto = TTY only)')
 cli.option('--save-report <file>', 'scan only: ALSO write the printed report to a file (.json/.md/.txt, format by extension)')
 cli.option('--report <file>', 'alias of --save-report')
+cli.option('--save-baseline <name>', 'stats only: save a metadata snapshot of this run to ~/.nmh/baselines/<name>.json')
+cli.option('--compare <name>', 'stats only: diff this run against a stored baseline (totals, per-node_modules, package movers)')
+cli.option('--history', 'stats only: list stored baselines — no scan at all')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -206,6 +210,28 @@ async function main(): Promise<number> {
     }
   }
 
+  // baseline trio (PRD §8.3): names validated before any scan writes happen
+  if (flags.saveBaseline === true) {
+    errorLog('--save-baseline needs a name — nmh stats --save-baseline <name>')
+    return 1
+  }
+  if (flags.compare === true) {
+    errorLog('--compare needs a name — nmh stats --compare <name>')
+    return 1
+  }
+  const baselineSave = typeof flags.saveBaseline === 'string' ? flags.saveBaseline : null
+  const baselineCompare = typeof flags.compare === 'string' ? flags.compare : null
+  const baselineHistory = flags.history === true
+  if (baselineSave !== null && !validateBaselineName(baselineSave)) {
+    errorLog(`invalid baseline name: '${baselineSave}' (expected letters/digits/._-, max 64)`)
+    return 1
+  }
+  if (baselineCompare !== null && !validateBaselineName(baselineCompare)) {
+    errorLog(`invalid baseline name: '${baselineCompare}' (expected letters/digits/._-, max 64)`)
+    return 1
+  }
+  const baselineGiven = baselineSave !== null || baselineCompare !== null || baselineHistory
+
   const cwd = process.cwd()
   const dryRun = flags.dryRun === true
   const assumeYes = flags.yes === true || flags.force === true
@@ -337,6 +363,10 @@ async function main(): Promise<number> {
     })
   }
 
+  if (baselineGiven && !statsGiven) {
+    errorLog('--save-baseline/--compare/--history only work with the stats command — nmh stats --save-baseline <name>')
+    return 1
+  }
   if (statsGiven) {
     if (deleted.given || subcommand === 'clean') {
       errorLog('--stats is read-only — combine it with scan, not with delete/clean')
@@ -376,6 +406,9 @@ async function main(): Promise<number> {
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       expand,
+      saveBaseline: baselineSave ?? undefined,
+      compareBaseline: baselineCompare ?? undefined,
+      history: baselineHistory,
     })
   }
   if (flags.top !== undefined || by !== null) {

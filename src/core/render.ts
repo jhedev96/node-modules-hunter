@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
 import { formatBytes, formatAge } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
+import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
 import type {
   DeleteMode,
   DeleteOutcome,
@@ -498,11 +499,16 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   return lines.join('\n')
 }
 
-export function renderStatsJson(outcome: StatsOutcome, request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' }): string {
+export function renderStatsJson(
+  outcome: StatsOutcome,
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' },
+  extra?: { baseline?: BaselineJsonExtra },
+): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
     mode: request.tree === true ? 'tree' : request.by ?? 'report',    topN: request.topN ?? 10,
+    baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
     sizeGroups: outcome.sizeGroups,
@@ -626,4 +632,88 @@ export function renderGlobalJson(outcome: GlobalOutcome, request: { pmFilter?: s
     permissionIssues: outcome.permissionIssues,
   }
   return JSON.stringify(payload, null, 2)
+}
+
+/** Optional telemetry stamped into stats JSON when baseline flags are involved. */
+export interface BaselineJsonExtra {
+  saved?: { name: string; createdAt?: string; file?: string }
+  compare?: BaselineComparison | null
+}
+
+const signedBytes = (n: number): string => (n > 0 ? '+' : n < 0 ? '−' : '±') + formatBytes(Math.abs(n))
+
+export function renderBaselineCompare(comp: BaselineComparison): string {
+  const lines: string[] = []
+  lines.push(`━━━ ${colors.bold('BASELINE COMPARE')} ━━━`)
+  lines.push(`Baseline         : '${comp.baselineName}' saved ${comp.baselineCreatedAt}`)
+  const pct =
+    comp.totalDeltaPercent === null ? '' : ` (${comp.totalDeltaPercent > 0 ? '+' : comp.totalDeltaPercent < 0 ? '−' : '±'}${Math.abs(comp.totalDeltaPercent)}%)`
+  lines.push(`Total size       : ${signedBytes(comp.totalDelta)}${pct} — was ${formatBytes(comp.totalBefore)}, now ${formatBytes(comp.totalAfter)}`)
+  lines.push(`Packages         : ${signedBytes(comp.packagesDelta)}`)
+
+  const changed = comp.deltas.filter((delta) => delta.kind !== 'same')
+  if (changed.length > 0) {
+    lines.push('')
+    const table = new Table({
+      head: [colors.dim('Path'), colors.dim('Before'), colors.dim('Now'), colors.dim('Δ')],
+      style: { head: [], border: colorEnabled() ? ['gray'] : [] },
+    })
+    for (const delta of changed.slice(0, 15)) {
+      const marker =
+        delta.kind === 'new'
+          ? colors.yellow('new')
+          : delta.kind === 'gone'
+            ? colors.dim('gone')
+            : ''
+      table.push([
+        marker ? `${delta.rel} ${marker}` : delta.rel,
+        delta.before === null ? '—' : formatBytes(delta.before),
+        delta.after === null ? '—' : formatBytes(delta.after),
+        delta.delta >= 0 ? colors.yellow(signedBytes(delta.delta)) : signedBytes(delta.delta),
+      ])
+    }
+    lines.push(table.toString())
+    if (changed.length > 15) {
+      lines.push(colors.dim(`… plus ${changed.length - 15} more changed path(s)`))
+    }
+  }
+
+  if (comp.packageMovers.length > 0) {
+    lines.push('')
+    lines.push(`Package movers   :`)
+    comp.packageMovers.slice(0, 5).forEach((mover, index) => {
+      const rank = String(index + 1).padStart(2)
+      const delta = mover.delta >= 0 ? colors.yellow(signedBytes(mover.delta)) : signedBytes(mover.delta)
+      lines.push(`${rank}. ${mover.name}  ${delta}`)
+    })
+  }
+
+  if (Math.abs(comp.totalDelta) > 0 && comp.totalBefore > 0 && comp.totalDeltaPercent !== null && comp.totalDeltaPercent > 30) {
+    lines.push(colors.yellow('🚨 bloat growth detected — node_modules grew by more than 30% since the baseline'))
+  }
+  return lines.join('\n')
+}
+
+export function renderBaselineHistory(items: BaselineListItem[], cwd: string): string {
+  const lines: string[] = []
+  lines.push(colors.cyan(`⚖ nmh baselines — ${items.length} saved`))
+  if (items.length === 0) {
+    lines.push(colors.dim('save one with: nmh stats --save-baseline <name>'))
+    return lines.join('\n')
+  }
+  const table = new Table({
+    head: [colors.dim('Name'), colors.dim('Saved'), colors.dim('Size'), colors.dim('Node_modules'), colors.dim('Where')],
+    style: { head: [], border: colorEnabled() ? ['gray'] : [] },
+  })
+  for (const item of items) {
+    table.push([
+      item.name + (item.cwd === cwd ? colors.yellow(' · this dir') : ''),
+      item.createdAt.replace('T', ' ').replace(/\..*/, '').replace(/Z$/, ''),
+      formatBytes(item.totals.size ?? 0),
+      String(item.totals.folders ?? 0),
+      shortenPath(item.cwd, cwd, 40),
+    ])
+  }
+  lines.push(table.toString())
+  return lines.join('\n')
 }
