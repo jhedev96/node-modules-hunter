@@ -12,10 +12,10 @@ import {
 } from '../utils/baseline.ts'
 import { toolVersion } from '../utils/version.ts'
 import { collectScan } from './scan.ts'
-import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor, depSpecFor, type DepSpec } from '../core/packages.ts'
+import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor, depSpecFor, createDepClassifier, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
-import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsOutcome, StatsPackageGroup } from '../core/result.ts'
+import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -150,6 +150,9 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   const sizeGroups = [...byName.values()].sort((a, b) => b.totalSize - a.totalSize || a.name.localeCompare(b.name))
   const dedupSuggestions = await buildSuggestions(members)
 
+  // --by type: classify every installed instance by its declaring dep field (cached manifests)
+  const typeBreakdown = request.by === 'type' ? await buildTypeBreakdown(projectsResults) : []
+
   const instances = sizeGroups.reduce((sum, group) => sum + group.copies, 0)
   let unique = 0
   for (const versions of versionsByName.values()) unique += versions.size
@@ -170,7 +173,30 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, permissionIssues: scan.result.permissionIssues }
+}
+
+/**
+ * --by type (PRD §8.1): bucket every installed instance by the dep field declaring it —
+ * undeclared instances fold into `transitive`. Fixed canonical bucket order.
+ */
+async function buildTypeBreakdown(projectsResults: MapProjectInfo[]): Promise<StatsTypeBreakdown[]> {
+  const classify = createDepClassifier()
+  const buckets = new Map<string, { size: number; packages: number }>()
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'transitive']) {
+    buckets.set(field, { size: 0, packages: 0 })
+  }
+  await Promise.all(
+    projectsResults.map(async (project) => {
+      for (const pkg of project.topPackages) {
+        const hit = await classify(project.entry.path, pkg.name)
+        const bucket = buckets.get(hit?.field ?? 'transitive')!
+        bucket.packages += 1
+        if (pkg.size != null) bucket.size += pkg.size
+      }
+    }),
+  )
+  return [...buckets].map(([field, agg]) => ({ field, size: agg.size, packages: agg.packages }))
 }
 
 /** Enough to find an instance's hosting entry + manifest again when building suggestions. */
@@ -294,10 +320,6 @@ export async function runStats(request: StatsRequest): Promise<number> {
     return 2
   }
 
-  if (request.by === 'type') {
-    warn("--by=type (breakdown by dependency group) lands with lockfile parsing (v0.4) — showing the size breakdown for now")
-  }
-
   const fresh = snapshotFromStats(request.cwd, outcome)
   const comparison = baseForCompare !== null ? compareBaseline(request.compareBaseline!, baseForCompare, fresh) : null
 
@@ -326,7 +348,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
     cwd: request.cwd,
     expand: request.expand === true,
     topN: request.topN ?? 10,
-    by: request.by === 'type' ? 'package' : request.by ?? null,
+    by: request.by ?? null,
   }))
   if (comparison !== null) log(renderBaselineCompare(comparison))
   return outcome.code

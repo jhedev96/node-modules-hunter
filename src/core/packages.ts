@@ -134,32 +134,69 @@ export interface DepSpec {
 
 const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'] as const
 
+type ClassifyHit = { field: string; range: string; projectDir: string; projectName: string | null }
+
+/**
+ * Cached dep classifier: one manifest read per directory, first manifest on the
+ * climb that names the package (in any dep field) wins — same attribution as
+ * `depSpecFor`, but cheap enough for N packages × M entries.
+ */
+export function createDepClassifier(): (entryPath: string, pkgName: string) => Promise<ClassifyHit | null> {
+  const cache = new Map<string, LoosePackageJson | null>()
+  const readManifest = async (dir: string): Promise<LoosePackageJson | null> => {
+    let manifest = cache.get(dir)
+    if (manifest === undefined) {
+      manifest = await readPackageJson(dir)
+      cache.set(dir, manifest)
+    }
+    return manifest
+  }
+  return async (entryPath: string, pkgName: string): Promise<ClassifyHit | null> => {
+    let dir = path.dirname(entryPath)
+    for (let hop = 0; hop < MAX_CLIMB; hop += 1) {
+      const pkg = await readManifest(dir)
+      if (pkg) {
+        for (const field of DEP_FIELDS) {
+          const range = (pkg[field] as Record<string, unknown> | undefined)?.[pkgName]
+          if (typeof range === 'string') {
+            return {
+              field,
+              range,
+              projectDir: dir,
+              projectName: typeof pkg.name === 'string' ? pkg.name : null,
+            }
+          }
+        }
+      }
+      const parent = path.dirname(dir)
+      if (parent === dir) return null
+      dir = parent
+    }
+    return null
+  }
+}
+
+/**
+ * Only the requirer's OWN manifest counts for required-by (PRD §8.2): no ancestor
+ * climb — a project declaring lodash must not be attributed to every sibling.
+ */
+export async function ownManifestRequires(pkgPath: string, pkgName: string): Promise<{ range: string; field: string } | null> {
+  const manifest = await readPackageJson(pkgPath)
+  if (manifest === null) return null
+  for (const field of DEP_FIELDS) {
+    const range = (manifest[field] as Record<string, unknown> | undefined)?.[pkgName]
+    if (typeof range === 'string') return { range, field }
+  }
+  return null
+}
+
 /**
  * Where + how a specific package name is declared around an entry (PRD §8.2 dedup
  * suggestion): nearest manifest on the climb wins, checked per dep field.
  */
 export async function depSpecFor(entryPath: string, pkgName: string): Promise<DepSpec | null> {
-  let dir = path.dirname(entryPath)
-  for (let hop = 0; hop < MAX_CLIMB; hop += 1) {
-    const pkg = await readPackageJson(dir)
-    if (pkg) {
-      for (const field of DEP_FIELDS) {
-        const range = (pkg[field] as Record<string, unknown> | undefined)?.[pkgName]
-        if (typeof range === 'string') {
-          return {
-            range,
-            field,
-            projectDir: dir,
-            projectName: typeof pkg.name === 'string' ? pkg.name : null,
-          }
-        }
-      }
-    }
-    const parent = path.dirname(dir)
-    if (parent === dir) return null
-    dir = parent
-  }
-  return null
+  const hit = await createDepClassifier()(entryPath, pkgName)
+  return hit
 }
 
 export interface ProjectDeps {

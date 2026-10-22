@@ -99,7 +99,7 @@ describe('stats e2e (spawned CLI, non-TTY)', () => {
     }
   })
 
-  it('--by size is an accepted alias; --by type warns and falls back; invalid values are usage errors', async () => {
+  it('--by size is an accepted alias; --by type focuses the breakdown; invalid values are usage errors', async () => {
     const fx = await dupFixture('stats-by')
     try {
       const sizeAlias = await runCli(['stats', fx.root, '--by', 'size'])
@@ -107,10 +107,11 @@ describe('stats e2e (spawned CLI, non-TTY)', () => {
       expect(sizeAlias.stdout).toContain('TOP')
       expect(sizeAlias.stderr).not.toContain('--by')
 
-      const typeWarn = await runCli(['stats', fx.root, '--by', 'type'])
-      expect(typeWarn.code).toBe(0)
-      expect(typeWarn.stderr).toContain('v0.4')
-      expect(typeWarn.stdout).toContain('TOP') // falls back to the size breakdown
+      const typeFocus = await runCli(['stats', fx.root, '--by', 'type'])
+      expect(typeFocus.code).toBe(0)
+      expect(typeFocus.stderr).not.toContain('v0.4') // real since v0.4 — no fallback warning
+      expect(typeFocus.stdout).toContain('BY TYPE')
+      expect(typeFocus.stdout).not.toContain('TOP') // focused view, size list stays hidden
 
       const badBy = await runCli(['stats', fx.root, '--by', 'horoscope'])
       expect(badBy.code).toBe(1)

@@ -148,6 +148,37 @@ export interface StatsOutcome {
   sizeGroups: StatsPackageGroup[]
   /** Top identical-version dup groups with per-copy declared ranges (suggestion fuel). */
   dedupSuggestions: DedupSuggestion[]
+  /** --by type: per dependency-field size/count buckets (empty on other modes). */
+  typeBreakdown: StatsTypeBreakdown[]
+  permissionIssues: string[]
+}
+
+export interface StatsTypeBreakdown {
+  /** dependencies | devDependencies | optionalDependencies | peerDependencies | transitive */
+  field: string
+  /** Sum of instance sizes in this bucket (symlinked instances are sizeless). */
+  size: number
+  packages: number
+}
+
+/** One installed copy of the `--why` target. */
+export interface WhyInstanceInfo {
+  displayPath: string
+  pm: string
+  version: string | null
+  symlinked: boolean
+  size: number | null
+  /** Project-manifest declaration around the hosting entry, null when transitive. */
+  declaredBy: { projectName: string | null; range: string; field: string } | null
+  /** Sibling packages whose manifests name the target (best-effort required-by). */
+  requiredBy: Array<{ name: string; version: string | null; range: string; field: string }>
+}
+
+export interface WhyOutcome {
+  /** 0 found, 2 nothing found, 4 partial permission issues. */
+  code: number
+  pkg: string
+  instances: WhyInstanceInfo[]
   permissionIssues: string[]
 }
 

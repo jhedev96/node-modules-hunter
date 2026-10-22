@@ -18,7 +18,10 @@ import type {
   ScanEntry,
   SearchOutcome,
   StatsOutcome,
+  StatsPackageGroup,
+  StatsTypeBreakdown,
   ScanTotals,
+  WhyOutcome,
 } from './result.ts'
 
 /** Absolute path → short display path: `~/…` for the home tree, `./…` for subpaths of cwd, middle-truncated. */
@@ -446,7 +449,7 @@ export interface RenderStatsOptions {
   cwd: string
   expand?: boolean
   topN: number
-  by: 'package' | 'size' | null
+  by: 'package' | 'size' | 'type' | null
 }
 
 function projectBadges(projects: MapProjectInfo[]): string {
@@ -470,7 +473,17 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   }
   lines.push(`Waste (dedupable) : ${formatBytes(overview.waste)} (${overview.wastePercent}% of package sizes)`)
 
-  const top = outcome.sizeGroups.slice(0, options.topN)
+  if (options.by === 'type') {
+    // focused view (§8.1): overview + BY TYPE only — TOP/dedup sections stay hidden
+    lines.push('')
+    lines.push(`━━━ ${colors.bold('BY TYPE')} ━━━`)
+    for (const row of outcome.typeBreakdown) {
+      if (row.packages === 0) continue
+      lines.push(`${row.field.padEnd(22)}: ${formatBytes(row.size)} · ${row.packages} pkg`)
+    }
+  }
+
+  const top = options.by === 'type' ? [] : outcome.sizeGroups.slice(0, options.topN)
   if (top.length > 0) {
     lines.push('')
     lines.push(`━━━ ${colors.bold(`TOP ${options.topN} SIZE`)} ━━━`)
@@ -531,6 +544,7 @@ export function renderStatsJson(
     permissionIssues: outcome.permissionIssues,
     sizeGroups: outcome.sizeGroups,
     dedupSuggestions: outcome.dedupSuggestions,
+    typeBreakdown: outcome.typeBreakdown,
     projects: outcome.projects.map((project) => ({
       project: project.project,
       path: project.entry.path,
@@ -735,4 +749,52 @@ export function renderBaselineHistory(items: BaselineListItem[], cwd: string): s
   }
   lines.push(table.toString())
   return lines.join('\n')
+}
+
+export function renderWhyReport(outcome: WhyOutcome, options: { cwd: string; expand?: boolean }): string {
+  const lines: string[] = []
+  lines.push(colors.cyan(`🔍 why '${outcome.pkg}' — ${outcome.instances.length} instance(s)`))
+  for (const instance of outcome.instances) {
+    lines.push('')
+    const version = instance.version !== null ? `@${instance.version}` : ''
+    const linked = instance.symlinked
+    const size = linked ? colors.dim('linked') : formatBytes(instance.size ?? 0)
+    lines.push(`${colors.bold(instance.displayPath)} · ${colors.bold(outcome.pkg + version)} · ${size}${instance.pm !== 'unknown' ? colors.dim(` · ${instance.pm}`) : ''}`)
+    if (instance.declaredBy !== null) {
+      lines.push(`  project              : ${instance.declaredBy.projectName ?? '(manifest tanpa nama)'} declares ${colors.yellow(instance.declaredBy.range)} (${instance.declaredBy.field})`)
+    } else {
+      lines.push(colors.dim('  project              : transitive — tidak dideklarasi di manifest manapun'))
+    }
+    if (instance.requiredBy.length > 0) {
+      lines.push(`  required by          : ${instance.requiredBy.length} package(s)`)
+      for (const req of instance.requiredBy.slice(0, 10)) {
+        const reqVersion = req.version !== null ? `@${req.version}` : ''
+        lines.push(`    · ${req.name}${reqVersion} → ${req.range} (${req.field})`)
+      }
+      if (instance.requiredBy.length > 10) {
+        lines.push(colors.dim(`    … plus ${instance.requiredBy.length - 10} more requirer(s)`))
+      }
+    } else {
+      lines.push(colors.dim('  required by          : no package manifest names it — orphan copy'))
+    }
+  }
+  if (outcome.permissionIssues.length > 0) {
+    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`))
+  }
+  return lines.join('\n')
+}
+
+export function renderWhyJson(outcome: WhyOutcome, _request: { cwd: string }): string {
+  return JSON.stringify(
+    {
+      nmh: toolVersion(),
+      command: 'why',
+      pkg: outcome.pkg,
+      found: outcome.instances.length,
+      instances: outcome.instances,
+      permissionIssues: outcome.permissionIssues,
+    },
+    null,
+    2,
+  )
 }

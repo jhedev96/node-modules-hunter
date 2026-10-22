@@ -5,7 +5,6 @@
 const FUTURE_FLAGS = new Set([
   'empty',
 
-  'why',
   'updateCheck',
   'online',
   'co2',

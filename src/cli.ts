@@ -10,6 +10,7 @@ import { REPORT_EXTENSIONS } from './utils/report.ts'
 import { validateBaselineName } from './utils/baseline.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
+import { runWhy } from './commands/why.ts'
 import { runMap } from './commands/map.ts'
 import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
@@ -52,6 +53,7 @@ cli.option('--report <file>', 'alias of --save-report')
 cli.option('--save-baseline <name>', 'stats only: save a metadata snapshot of this run to ~/.nmh/baselines/<name>.json')
 cli.option('--compare <name>', 'stats only: diff this run against a stored baseline (totals, per-node_modules, package movers)')
 cli.option('--history', 'stats only: list stored baselines — no scan at all')
+cli.option('--why <pkg>', 'read-only: explain an installed package — instances, declaring manifest, which siblings require it')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -303,6 +305,41 @@ async function main(): Promise<number> {
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       expand,
     })
+  }
+
+  // why: subcommand (`nmh why <pkg> [dirs]`) or flag (`--why <pkg>` on any read-only form)
+  const whyGiven = typeof flags.why === 'string' && flags.why.length > 0
+  if (subcommand === 'why' || whyGiven) {
+    if (deleted.given || subcommand === 'clean') {
+      errorLog('--why is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    const pkg = subcommand === 'why' ? rest[0] : flags.why
+    if (typeof pkg !== 'string' || pkg.length === 0) {
+      errorLog('why needs a package name — nmh why <pkg> [dirs]')
+      return 1
+    }
+    if (typeof flags.why === 'string' && subcommand === 'why' && rest.length > 1 && flags.why !== rest[0]) {
+      errorLog(`--why (${flags.why}) conflicts with the why subcommand's package (${rest[0]}) — pick one`)
+      return 1
+    }
+    const whyTargets = subcommand === 'why' ? [...rest.slice(1), ...dirTargets] : targets
+    return runWhy({
+      pkg,
+      targets: whyTargets,
+      cwd,
+      json,
+      maxDepth: effectiveDepth,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      expand,
+    })
+  }
+  if (flags.why !== undefined) {
+    errorLog('--why needs a package name — nmh why <pkg> [dirs]')
+    return 1
   }
 
   // map & stats: subcommand ('nmh map [dirs]' / 'nmh stats [dirs]') or flags (--map/-m, --stats)
