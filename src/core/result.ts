@@ -154,6 +154,10 @@ export interface StatsOutcome {
   typeBreakdown: StatsTypeBreakdown[]
   /** --licenses: per-license buckets (empty when the flag is absent). */
   licenseBreakdown: StatsLicenseRow[]
+  /** --score: composite bloat score (null when the flag is absent). */
+  score: BloatScore | null
+  /** --co2: order-of-magnitude carbon estimate (null when the flag is absent). */
+  co2: Co2Estimate | null
   /** --phantom/--dead: best-effort import audit; null when the flags are absent. */
   depsAudit: DepsAudit | null
   permissionIssues: string[]
@@ -165,6 +169,44 @@ export interface StatsTypeBreakdown {
   /** Sum of instance sizes in this bucket (symlinked instances are sizeless). */
   size: number
   packages: number
+}
+
+/** One license bucket (PRD §8.2 license summary). */
+/** Composite bloat score (PRD §8.2, experimental): waste% + dup factor + dead% + size. */
+export interface BloatScoreComponents {
+  /** Overview wastePercent (dedup-able bytes / package bytes). */
+  wastePercent: number
+  /** 0–40: waste% × 2, capped. */
+  wastePoints: number
+  /** Overview dupFactor (1 deprecated× = flat install). */
+  dupFactor: number
+  /** 0–20: (dupFactor−1) × 60, capped. */
+  dupPoints: number
+  /** dead declarations / instances, % when the audit ran (--dead or implicit via --score). */
+  deadPercent: number
+  /** 0–20: dead% × 2, capped. */
+  deadPoints: number
+  /** Absolute count fed into deadPercent (0 when no audit ran). */
+  deadPackages: number
+  /** 0–20: totalSize linear vs 512 MB reference, capped. */
+  sizePoints: number
+}
+
+/** Total composite score 0–100 (higher = more bloated) + rank grade. */
+export interface BloatScore {
+  score: number
+  grade: 'A' | 'B' | 'C' | 'D' | 'F'
+  components: BloatScoreComponents
+}
+
+/** Order-of-magnitude carbon estimate (PRD §8.2, experimental — clearly labeled rough). */
+export interface Co2Estimate {
+  /** Package bytes / node_modules size the estimate covers. */
+  totalSize: number
+  /** Idle storage for one year, grams CO2e (constants in stats.ts). */
+  storageGrams: number
+  /** One full redownload of the same bytes, grams CO2e. */
+  transferGrams: number
 }
 
 /** One license bucket (PRD §8.2 license summary). */

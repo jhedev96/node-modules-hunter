@@ -2,7 +2,7 @@ import Table from 'cli-table3'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
-import { formatBytes, formatAge } from '../utils/format.ts'
+import { formatBytes, formatAge, formatCo2 } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
 import type {
@@ -506,7 +506,35 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
-  const focused = options.by === 'type' || options.by === 'licenses' || options.licenses === true || (options.audit ?? null) !== null
+  if (outcome.score !== null || outcome.co2 !== null) {
+    // experimental focus (§8.2): overview + SCORE/CO2 only
+    lines.push('')
+    lines.push(`━━━ ${colors.bold(outcome.score !== null ? 'BLOAT SCORE' : 'CO2 ESTIMATE')} ━━━ ${colors.dim('(experimental)')}`)
+    if (outcome.score !== null) {
+      const { score, grade, components } = outcome.score
+      const filled = Math.round((score / 100) * 20)
+      lines.push(
+        `${String(score).padStart(3)} / 100  grade ${grade}  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}]`,
+      )
+      lines.push(`${colors.dim('waste')}  ${components.wastePercent}%  → ${components.wastePoints} pt`)
+      lines.push(`${colors.dim('dup factor')}  ${components.dupFactor}×  → ${components.dupPoints} pt`)
+      if (components.deadPackages > 0) {
+        lines.push(`${colors.dim('dead')}  ${components.deadPercent}% (${components.deadPackages} pkg)  → ${components.deadPoints} pt`)
+      } else {
+        lines.push(`${colors.dim('dead')}  (tidak diaudit — tambahkan --dead untuk daftar)  → 0 pt`)
+      }
+      lines.push(`${colors.dim('size')}  ${formatBytes(outcome.overview.totalSize)}  → ${components.sizePoints} pt`)
+    }
+    if (outcome.co2 !== null) {
+      lines.push(`${colors.dim('estimasi kasar, bukan audit karbon — simpan setahun')}: ${formatCo2(outcome.co2.storageGrams)}`)
+      lines.push(`${colors.dim('kalau men-download ulang semuanya sekali')}: ${formatCo2(outcome.co2.transferGrams)}`)
+    }
+  }
+
+  const focused =
+    options.by === 'type' || options.by === 'licenses' || options.licenses === true ||
+    outcome.score !== null || outcome.co2 !== null ||
+    (options.audit ?? null) !== null
 
   if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
     lines.push('')
@@ -562,13 +590,13 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
 
 export function renderStatsJson(
   outcome: StatsOutcome,
-  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean },
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean },
   extra?: { baseline?: BaselineJsonExtra },
 ): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? (request.licenses === true ? 'licenses' : 'report'),
+    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.licenses === true ? 'licenses' : 'report'),
     baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
@@ -576,6 +604,8 @@ export function renderStatsJson(
     dedupSuggestions: outcome.dedupSuggestions,
     typeBreakdown: outcome.typeBreakdown,
     licenseBreakdown: outcome.licenseBreakdown,
+    score: outcome.score,
+    co2: outcome.co2,
     depsAudit: outcome.depsAudit,
     projects: outcome.projects.map((project) => ({
       project: project.project,

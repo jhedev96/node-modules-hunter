@@ -6,8 +6,6 @@ const FUTURE_FLAGS = new Set([
   'empty',
 
   'online',
-  'co2',
-  'score',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */

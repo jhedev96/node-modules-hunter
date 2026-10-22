@@ -17,7 +17,7 @@ import { collectScan } from './scan.ts'
 import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
-import type { DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown } from '../core/result.ts'
+import type { BloatScore, Co2Estimate, DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -47,9 +47,14 @@ export interface StatsRequest {
   dead?: boolean
   /** --licenses: bucket instances by their (normalized) license field. */
   licenses?: boolean
+  /** --score: composite bloat score 0–100 (runs the deps audit implicitly for the deadness component). */
+  score?: boolean
+  /** --co2: order-of-magnitude carbon estimate. */
+  co2?: boolean
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
+const round2 = (n: number): number => Math.round(n * 100) / 100
 
 /**
  * Stats (PRD §8, v0.3 slice): scan → per-package sizes across every entry →
@@ -166,16 +171,19 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   const licenseBreakdown = request.licenses === true || request.by === 'licenses' ? await buildLicenseBreakdown(projectsResults) : []
 
   // --phantom/--dead: best-effort import audit over the enclosing project dirs
-  const depsAudit =
-    request.phantom === true || request.dead === true
-      ? await collectDepsAudit(
-          projectsResults.map((project) => ({
-            dir: project.declared?.projectDir ?? path.dirname(project.entry.path),
-            projectName: project.declared?.name ?? null,
-          })),
-          new Set(projectsResults.flatMap((project) => project.topPackages.map((pkg) => pkg.name))),
-        )
-      : null
+  // The audit runs for --phantom/--dead AND implicitly for --score (deadness component),
+  // but is only exposed to the outcome when actually requested (depsAudit stays null otherwise).
+  const requestedAudit = request.phantom === true || request.dead === true
+  const needsAudit = requestedAudit || request.score === true
+  const depsAudit = needsAudit
+    ? await collectDepsAudit(
+        projectsResults.map((project) => ({
+          dir: project.declared?.projectDir ?? path.dirname(project.entry.path),
+          projectName: project.declared?.name ?? null,
+        })),
+        new Set(projectsResults.flatMap((project) => project.topPackages.map((pkg) => pkg.name))),
+      )
+    : null
 
   const instances = sizeGroups.reduce((sum, group) => sum + group.copies, 0)
   let unique = 0
@@ -193,11 +201,65 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
     declared: projectsWithManifest > 0 ? declaredSum : null,
   }
 
+  const score = request.score === true ? buildScore(overview, depsAudit?.dead.length ?? 0) : null
+  const co2 = request.co2 === true ? buildCo2(overview) : null
+
   let code = 0
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, depsAudit, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, score, co2, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
+}
+
+/**
+ * --score (PRD §8.2, experimental): composite 0–100 bloat score.
+ * Deterministic weights — waste% dominates (0–40), dup factor (0–20), dead
+ * declarations (0–20, only when the audit data exists) and absolute size vs a
+ * 512 MB reference (0–20). Higher = more bloated; grades at 20-point steps.
+ */
+export function buildScore(overview: StatsOverview, deadPackages: number): BloatScore {
+  const wastePoints = clampPts(overview.wastePercent * 2, 40)
+  const dupPoints = clampPts((overview.dupFactor - 1) * 60, 20)
+  const deadPercent = overview.instances > 0 ? (deadPackages / overview.instances) * 100 : 0
+  const deadPoints = clampPts(deadPercent * 2, 20)
+  const sizePoints = clampPts((overview.totalSize / (512 * 1024 * 1024)) * 20, 20)
+  const score = Math.min(100, wastePoints + dupPoints + deadPoints + sizePoints)
+  const grade = score < 20 ? 'A' : score < 40 ? 'B' : score < 60 ? 'C' : score < 80 ? 'D' : 'F'
+  return {
+    score,
+    grade,
+    components: {
+      wastePercent: overview.wastePercent,
+      wastePoints,
+      dupFactor: overview.dupFactor,
+      dupPoints,
+      deadPercent: round1(deadPercent),
+      deadPoints,
+      deadPackages,
+      sizePoints,
+    },
+  }
+}
+
+/** cap a weighted component at maxPoints, rounded. */
+function clampPts(value: number, max: number): number {
+  return Math.min(max, Math.max(0, Math.round(value)))
+}
+
+/** --co2 (PRD §8.2, experimental): order-of-magnitude carbon estimate.
+ * Storage: ~2 g CO2e per GB idle per year (grid intensity + embodied amortization —
+ * published LCAs vary ~0.7–5 g; we pick the middle). Transfer: ~10 g per GB moved
+ * (one redownload; quoted range 5–50). Clearly labeled rough estimates. */
+export const STORAGE_GCO2_PER_GB_YEAR = 2
+export const TRANSFER_GCO2_PER_GB = 10
+
+export function buildCo2(overview: StatsOverview): Co2Estimate {
+  const gb = overview.totalSize / (1024 * 1024 * 1024)
+  return {
+    totalSize: overview.totalSize,
+    storageGrams: round2(gb * STORAGE_GCO2_PER_GB_YEAR),
+    transferGrams: round2(gb * TRANSFER_GCO2_PER_GB),
+  }
 }
 
 /**

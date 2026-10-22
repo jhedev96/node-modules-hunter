@@ -38,3 +38,11 @@ const ANSI_ESCAPE = /\u001b\[[0-9;]*[A-Za-z]/g
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_ESCAPE, '').replace(/\r/g, '')
 }
+
+/** Human CO2 mass: kg at ≥1 kg, otherwise grams with enough decimals to stay honest. */
+export function formatCo2(grams: number): string {
+  if (Math.abs(grams) >= 1000) return `${(grams / 1000).toFixed(2)} kg CO2e`
+  if (Math.abs(grams) >= 10) return `${grams.toFixed(1)} g CO2e`
+  if (Math.abs(grams) >= 0.1) return `${grams.toFixed(2)} g CO2e`
+  return `${grams.toFixed(3)} g CO2e`
+}
