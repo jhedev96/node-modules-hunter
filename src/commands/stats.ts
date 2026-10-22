@@ -14,10 +14,11 @@ import { toolVersion } from '../utils/version.ts'
 import { collectDepsAudit } from '../core/deps-audit.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
-import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
+import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, deprecatedOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
-import type { BloatScore, Co2Estimate, DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
+import { registryDeprecated, registryDeprecatedCacheDir, MAX_REGISTRY_DEPRECATED_FETCHES } from '../utils/registry-deprecated.ts'
+import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -51,6 +52,8 @@ export interface StatsRequest {
   score?: boolean
   /** --co2: order-of-magnitude carbon estimate. */
   co2?: boolean
+  /** --online: deprecated scan of installed manifests + lazy registry fallback for missing notes. */
+  online?: boolean
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
@@ -98,6 +101,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
                 symlinked: ref.symlinked,
                 size: measure === null ? null : measure.size,
                 license: licenseOf(manifest),
+                deprecated: deprecatedOf(manifest),
               }
             }),
           ),
@@ -203,12 +207,18 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
 
   const score = request.score === true ? buildScore(overview, depsAudit?.dead.length ?? 0) : null
   const co2 = request.co2 === true ? buildCo2(overview) : null
+  const deprecations = request.online === true
+    ? await collectDeprecations(projectsResults, {
+        cacheDir: registryDeprecatedCacheDir(),
+        base: process.env.NMH_REGISTRY_URL,
+      })
+    : null
 
   let code = 0
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, score, co2, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, score, co2, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
 }
 
 /**
@@ -260,6 +270,64 @@ export function buildCo2(overview: StatsOverview): Co2Estimate {
     storageGrams: round2(gb * STORAGE_GCO2_PER_GB_YEAR),
     transferGrams: round2(gb * TRANSFER_GCO2_PER_GB),
   }
+}
+
+/**
+ * --online (PRD §5.4/§8.2): deprecated check. Installed manifests carry npm's
+ * `deprecated` note offline; instances without one get a lazy, cached registry
+ * lookup (capped per run) — silent on network failures, never blocks the scan.
+ */
+async function collectDeprecations(
+  projectsResults: MapProjectInfo[],
+  options: { cacheDir: string; base?: string },
+): Promise<DeprecationsOutcome> {
+  const refs: DeprecatedRef[] = []
+  const missing: Array<{ pkg: MapPackageRef; displayPath: string }> = []
+  for (const project of projectsResults) {
+    for (const pkg of project.topPackages) {
+      if (typeof pkg.deprecated === 'string') {
+        if (refs.length < 200) {
+          refs.push({
+            name: pkg.name,
+            version: pkg.version,
+            displayPath: project.entry.displayPath,
+            source: 'manifest',
+            message: pkg.deprecated.length > 200 ? `${pkg.deprecated.slice(0, 197)}…` : pkg.deprecated,
+          })
+        }
+      } else if (pkg.deprecated === null && pkg.symlinked === false && pkg.version !== null) {
+        missing.push({ pkg, displayPath: project.entry.displayPath })
+      }
+    }
+  }
+  // lazy registry fill for the blanks — unique asks, capped per run, silently best-effort
+  if (missing.length > 0) {
+    const unique = new Map<string, { pkg: MapPackageRef; displayPath: string }>()
+    for (const hit of missing) {
+      const key = `${hit.pkg.name}@${hit.pkg.version}`
+      if (!unique.has(key)) unique.set(key, hit)
+      if (unique.size >= MAX_REGISTRY_DEPRECATED_FETCHES) break
+    }
+    const fetchLimiter = createLimiter(6)
+    await Promise.all(
+      [...unique.values()].map((hit) =>
+        fetchLimiter(async () => {
+          const answer = await registryDeprecated(hit.pkg.name, hit.pkg.version ?? '', options.cacheDir, options.base)
+          const message = answer?.message
+          if (answer !== null && typeof message === 'string' && refs.length < 200) {
+            refs.push({
+              name: hit.pkg.name,
+              version: hit.pkg.version,
+              displayPath: hit.displayPath,
+              source: 'registry',
+              message: message.length > 200 ? `${message.slice(0, 197)}…` : message,
+            })
+          }
+        }),
+      ),
+    )
+  }
+  return { count: refs.length, refs, truncated: refs.length >= 200, online: true }
 }
 
 /**

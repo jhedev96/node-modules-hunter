@@ -18,6 +18,8 @@ export interface LoosePackageJson {
   /** License field in any of its historical shapes: 'MIT' | {type} | [{type}] */
   license?: string | { type?: string; name?: string } | Array<{ type?: string; name?: string }>
   licenses?: Array<{ type?: string; name?: string }>
+  /** npm writes this into installed manifests when the version is deprecated ('note' | true). */
+  deprecated?: string | boolean
 }
 
 /** Normalize every historical `license` shape to a single type string, null when absent. */
@@ -51,6 +53,15 @@ export function isCopyleftLicense(type: string): boolean {
 
 export async function readLicense(pkgDir: string): Promise<string | null> {
   return licenseOf(await readPackageJson(pkgDir))
+}
+
+/** Deprecated note straight from the installed manifest (PRD §8.2). Boolean `true` → empty note. */
+export function deprecatedOf(manifest: LoosePackageJson | null): string | null {
+  if (manifest === null) return null
+  const raw = manifest.deprecated
+  if (typeof raw === 'string' && raw.trim().length > 0) return raw
+  if (raw === true) return ''
+  return null
 }
 
 export async function readPackageJson(dir: string): Promise<LoosePackageJson | null> {

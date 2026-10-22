@@ -60,6 +60,7 @@ cli.option('--dead', 'stats only: installed packages declared (outside peer) but
 cli.option('--licenses', 'stats only: bucket installed instances by their license field; flags copyleft in production deps')
 cli.option('--score', 'stats only: experimental composite bloat score 0-100 (waste % + dup factor + dead % + size)')
 cli.option('--co2', 'stats only: experimental carbon estimate (storage-year + one redownload)')
+cli.option('--online', 'stats only: deprecated scan — offline manifest data + lazy cached registry fallback for missing notes')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
@@ -297,8 +298,8 @@ async function main(): Promise<number> {
         : null
   // statsGiven early so read-only flag guards (below) cover every dispatch, not just stats itself.
   const statsGiven = flags.stats === true || subcommand === 'stats' || subcommand === 'analyze' || subcommand === 'info'
-  if ((flags.phantom === true || flags.dead === true || flags.licenses === true || flags.score === true || flags.co2 === true) && !statsGiven) {
-    errorLog('--phantom/--dead/--licenses/--score/--co2 only work with the stats command — nmh stats --score')
+  if ((flags.phantom === true || flags.dead === true || flags.licenses === true || flags.score === true || flags.co2 === true || flags.online === true) && !statsGiven) {
+    errorLog('--phantom/--dead/--licenses/--score/--co2/--online only work with the stats command — nmh stats --online')
     return 1
   }
   if (subcommand === 'search' || searchPattern !== null) {
@@ -468,6 +469,7 @@ async function main(): Promise<number> {
       licenses: flags.licenses === true,
       score: flags.score === true,
       co2: flags.co2 === true,
+      online: flags.online === true,
     })
   }
   if (flags.top !== undefined || by !== null) {

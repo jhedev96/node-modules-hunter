@@ -85,7 +85,7 @@ describe('format utils', () => {
 
 describe('future flags detector', () => {
   it('maps camelCase keys back to dashed flags', () => {
-    const hits = detectFutureFlags(['stats', 'online', 'dir', 'json', 'size', 'co2', 'score', 'licenses'])
-    expect(hits).toEqual(['--online']) // stats/why/save-baseline/co2/score/licenses became real by v0.5
+    const hits = detectFutureFlags(['stats', 'online', 'co2', 'score', 'licenses', 'dir', 'json', 'size', 'empty'])
+    expect(hits).toEqual(['--empty']) // stats/why/save-baseline/co2/score/licenses/online became real by v0.5
   })
 })

@@ -531,9 +531,28 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
+  if (outcome.deprecations !== null) {
+    // --online focus (§5.4/§8.2): overview + DEPRECATED only
+    lines.push('')
+    lines.push(`━━━ ${colors.bold('DEPRECATED')} ━━━`)
+    const { count, refs } = outcome.deprecations
+    if (count === 0) {
+      lines.push(colors.dim('tidak ada paket deprecated ☀️'))
+    } else {
+      lines.push(`${count} instance deprecated:`)
+      const shown = refs.slice(0, 10)
+      for (const ref of shown) {
+        const note = ref.message && ref.message.length > 0 ? ` — ${ref.message}` : ''
+        const tag = ref.source === 'registry' ? colors.dim(' [registry]') : ''
+        lines.push(`${colors.yellow(`${ref.name}${ref.version ? `@${ref.version}` : ''}`)}${tag}  ${ref.displayPath}${note}`)
+      }
+      if (refs.length > shown.length) lines.push(colors.dim(`…dan ${refs.length - shown.length} lainnya`))
+    }
+  }
+
   const focused =
     options.by === 'type' || options.by === 'licenses' || options.licenses === true ||
-    outcome.score !== null || outcome.co2 !== null ||
+    outcome.score !== null || outcome.co2 !== null || outcome.deprecations !== null ||
     (options.audit ?? null) !== null
 
   if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
@@ -590,13 +609,13 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
 
 export function renderStatsJson(
   outcome: StatsOutcome,
-  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean },
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean; online?: boolean },
   extra?: { baseline?: BaselineJsonExtra },
 ): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.licenses === true ? 'licenses' : 'report'),
+    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.licenses === true ? 'licenses' : request.online === true ? 'deprecated' : 'report'),
     baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
@@ -606,6 +625,7 @@ export function renderStatsJson(
     licenseBreakdown: outcome.licenseBreakdown,
     score: outcome.score,
     co2: outcome.co2,
+    deprecations: outcome.deprecations,
     depsAudit: outcome.depsAudit,
     projects: outcome.projects.map((project) => ({
       project: project.project,

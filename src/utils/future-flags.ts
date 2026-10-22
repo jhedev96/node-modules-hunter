@@ -4,8 +4,6 @@
  */
 const FUTURE_FLAGS = new Set([
   'empty',
-
-  'online',
 ])
 
 /** camelCased option keys seen by the CLI that are future scopes. */

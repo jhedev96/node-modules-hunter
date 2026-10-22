@@ -61,6 +61,8 @@ export interface MapPackageRef {
   size: number | null
   /** Normalized license field of the instance when stats measured it (stats-only byproduct). */
   license?: string | null
+  /** Deprecated note in the installed manifest, if any (stats-only byproduct). */
+  deprecated?: string | null
 }
 
 export interface MapDeclared {
@@ -158,6 +160,8 @@ export interface StatsOutcome {
   score: BloatScore | null
   /** --co2: order-of-magnitude carbon estimate (null when the flag is absent). */
   co2: Co2Estimate | null
+  /** deprecated sightings (null unless --deprecated/-d or --online ran). */
+  deprecations: DeprecationsOutcome | null
   /** --phantom/--dead: best-effort import audit; null when the flags are absent. */
   depsAudit: DepsAudit | null
   permissionIssues: string[]
@@ -207,6 +211,30 @@ export interface Co2Estimate {
   storageGrams: number
   /** One full redownload of the same bytes, grams CO2e. */
   transferGrams: number
+}
+
+/** One deprecated instance sighting (PRD §8.2 deprecated check). */
+export interface DeprecatedRef {
+  name: string
+  version: string | null
+  /** Display path of the hosting node_modules entry. */
+  displayPath: string
+  /** Where the deprecation info came from: the installed manifest or the registry (--online). */
+  source: 'manifest' | 'registry'
+  /** Deprecation note (truncated to 200 chars). */
+  message?: string
+}
+
+/** --deprecated scan outcome (null unless the stats run flagged deprecations). */
+export interface DeprecationsOutcome {
+  /** Instances flagged (= refs length). */
+  count: number
+  /** Per-instance sighting list (capped at 200 + truncated flag). */
+  refs: DeprecatedRef[]
+  /** True when the list exceeds the JSON cap. */
+  truncated: boolean
+  /** True when --online consulted the registry for missing local data. */
+  online: boolean
 }
 
 /** One license bucket (PRD §8.2 license summary). */
