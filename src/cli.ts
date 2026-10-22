@@ -1,6 +1,6 @@
 import { cac } from 'cac'
 import path from 'node:path'
-import { configureLogger, errorLog, warn, verboseLog } from './utils/logger.ts'
+import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
 import { splitTargets } from './utils/paths.ts'
 import { toolVersion } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
@@ -11,6 +11,7 @@ import { validateBaselineName } from './utils/baseline.ts'
 import { runScan } from './commands/scan.ts'
 import { runSearch } from './commands/search.ts'
 import { runWhy } from './commands/why.ts'
+import { checkForUpdate } from './utils/update-check.ts'
 import { runMap } from './commands/map.ts'
 import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
@@ -56,6 +57,7 @@ cli.option('--history', 'stats only: list stored baselines — no scan at all')
 cli.option('--why <pkg>', 'read-only: explain an installed package — instances, declaring manifest, which siblings require it')
 cli.option('--phantom', 'stats only: imports found in project sources but declared nowhere (best-effort regex audit)')
 cli.option('--dead', 'stats only: installed packages declared (outside peer) but never imported (best-effort regex audit)')
+cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -145,6 +147,12 @@ async function main(): Promise<number> {
     // --json shares stdout with the live counter → counter must stay silent
     progress: json ? 'off' : progress,
   })
+
+  // --update-check (PRD §5.5): opt-in, 24 h cache, failures stay silent — never on a JSON note
+  if (flags.updateCheck === true || config.updateCheck === true) {
+    const notice = await checkForUpdate().catch(() => null)
+    if (notice !== null) note(notice)
+  }
 
   for (const future of detectFutureFlags(Object.keys(flags))) {
     warn(`${future} lands in a later version (v0.2+) — ignored for now`)

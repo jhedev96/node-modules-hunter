@@ -34,7 +34,9 @@ nmh clean [dir]                    # scan + delete everything safe (trash by def
 nmh search <pattern> [dir…]        # find installed packages by name (+ versions & sizes)
 nmh map [dir]                      # project → PM → size → top packages → declared deps
 nmh stats [dir]                    # size analytics: dup factor, waste size, top-N, per-package tree
+nmh stats --by type [dir]          # breakdown per dependency field (dep/dev/optional/peer/transitive)
 nmh stats -g                       # global installs across npm/pnpm/yarn/bun — read-only analysis
+nmh why <pkg> [dir…]               # reverse depend: where is <pkg> and what requires it — read-only
 
 nmh --dir=A,B,glob/*/node_modules  # targets: comma list, globs, ~ — combine with flags below
 nmh version | --version | -v
@@ -61,10 +63,14 @@ Search patterns: plain text is a case-insensitive substring (`nmh search lodash`
 | `-m, --map [--tree]` | Project map table; `--tree` lists package names per project |
 | `--depend [pkg]` | With `map`: show declared deps per project; with a value, list which projects declare it |
 | `--stats` | Size analytics: instances vs unique names, duplication factor, dedupable waste, top-N list |
-| `--tree` / `--top <n>` / `--by size` | With `stats`: per-package size tree / row count (default 10) / breakdown mode (`type` lands in v0.4) |
+| `--tree` / `--top <n>` / `--by size\|type` | With `stats`: per-package size tree / row count (default 10) / breakdown mode — `type` buckets every instance by its declaring dep field (dependencies/dev/optional/peer + transitive) |
 | `-g, --global` | With `stats`: analyze the global installs of npm/pnpm/yarn/bun (per-PM prefix scan, cross-PM duplicates, dead bin symlinks — read-only) |
+| `--save-baseline <name>` / `--compare <name>` / `--history` | With `stats`: snapshot totals+per-package to `~/.nmh/baselines/<name>.json`, diff a later run against it (totals, per-node_modules tree, package movers, >30% growth warning), or just list snapshots |
+| `--why <pkg>` | Same as the `why` command, mixed into any read-only form |
+| `--phantom` / `--dead` | With `stats`: best-effort regex audit — imports declared nowhere / declared+installed packages nobody imports |
 | `--save-report <file>` / `--report <file>` | scan only: **also** write the printed report to a file — format picked by extension `.json` / `.md` / `.txt` |
 | `--animate` / `--no-animate` | Live size counter while measuring: auto = real TTY only, `--animate` forces it even when piped; always suppressed under `--json`; `.nmhrc animate:false` mutes it |
+| `--update-check` | Opt-in: peek npm for a newer release (non-blocking, 24 h cache, notice on stderr; also `updateCheck` in `.nmhrc`) |
 | `--config <file>` | Use this config file instead of the `.nmhrc` lookup (cwd → `$HOME`) |
 | `--json` | Machine-readable output (pipe into `jq`) |
 | `-q/--quiet`, `--verbose`, `--no-color` | Output control |
@@ -130,6 +136,81 @@ Stats rank the same package across many `node_modules` folders, so `dupFactor` g
 ```bash
 $ nmh scan ./my-repo --save-report report.md   # table on screen + file copy (also --report, .json/.md/.txt)
 ℹ 💾 report saved → report.md (md)
+```
+
+### Analytics deep-cut & audits (v0.4)
+
+**Baseline & compare** — snapshot a repo before a big refactor, diff after:
+
+```bash
+$ nmh stats ./my-repo --save-baseline before        # → ~/.nmh/baselines/before.json
+$ … dikerjain nanti …
+$ nmh stats ./my-repo --compare before
+━━━ BASELINE COMPARE ━━━
+Baseline         : 'before' saved 2026-10-22T03:33:15.875Z
+Total size       : +2.4 KB (+44.8%) — was 5.4 KB, now 7.9 KB
+Packages         : ±0 B
+┌──────────────────┬────────┬────────┬─────────┐
+│ Path             │ Before │ Now    │ Δ       │
+├──────────────────┼────────┼────────┼─────────┤
+│ api/node_modules │ 2.5 KB │ 4.9 KB │ +2.4 KB │
+└──────────────────┴────────┴────────┴─────────┘
+
+Package movers   :
+ 1. lodash  +2.4 KB
+🚨 bloat growth detected — node_modules grew by more than 30% since the baseline
+
+$ nmh stats --history               # list saved baselines (newest first) — no scan
+```
+
+**Dedup suggestion** — per-copy attribution so the waste number becomes actionable:
+
+```
+━━━ DEDUP SUGGESTION ━━━
+ 1. lodash@4.17.21  ×2 copies  +3.0 KB bisa hemat
+    · ./web/node_modules  · 3.9 KB · web declared ^4.17.0 (dependencies)
+    · ./api/node_modules  · 3.0 KB · api declared ^4.17.21 (devDependencies)
+    ↳ range declared beda (^4.17.0 vs ^4.17.21) — samakan dulu di package.json, lalu install ulang
+```
+
+Identical ranges get the hoist/dedupe hint (`npm dedupe` / `yarn dedupe`, pnpm virtual store), mixed ranges get the align-first warning, undeclared copies get the honest transitive note. Symlinked copies never count as a dedupable copy.
+
+**`nmh why <pkg>`** — reverse depend at manifest level:
+
+```
+$ nmh why lodash ./my-repo
+🔍 why 'lodash' — 1 instance(s)
+
+./web/node_modules · lodash@4.17.21 · 3.9 KB
+  project              : web declares ^4.17.21 (dependencies)
+  required by          : 1 package(s)
+    · express@4.19.2 → ^4.17.0 (dependencies)
+```
+
+Required-by uses only each sibling's **own manifest** (no ancestor climb, so a project declaring lodash is never attributed to innocent siblings); orphan copies say so; symlinked copies show as `linked` without a size.
+
+**`--by type` / `--phantom` / `--dead`** — the dependency-field breakdown plus the regex audit:
+
+```
+━━━ BY TYPE ━━━
+dependencies          : 2.0 KB · 1 pkg
+devDependencies       : 1.5 KB · 1 pkg
+peerDependencies      : 437 B · 1 pkg
+transitive            : 735 B · 1 pkg
+
+━━━ DEPS AUDIT ━━━
+· best-effort regex scan — 1 source file(s) (lockfile graph lands later)
+🧟 phantom imports — imported in code, declared nowhere (1)
+  · chalk — src/index.ts
+🪦 dead declarations — installed + declared, never imported (1)
+  · unused — web (dependencies)
+```
+
+Only bare package specifiers count (`node:fs`, `./util`, `#alias` skipped; subpaths folded to the package name); `peerDependencies` never count as dead; both audits are honest best-effort, lockfile-grade graphs land later. All of this is stats-family state: read-only, and combining any of it with `--delete`/`clean` is refused (exit 1).
+
+```bash
+$ nmh stats ./my-repo --update-check   # opt-in npm peek, 24 h cache
+ℹ update tersedia: 0.4.0 → 0.5.0 — npm i -g node-modules-hunter (…)
 ```
 
 ## Safety first (the whole point)
@@ -203,6 +284,7 @@ For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your 
   "defaultMode": "trash",
   "color": true,
   "animate": false,
+  "updateCheck": true,
   "logDir": "~/.cache/nmh-logs"
 }
 ```
@@ -214,7 +296,7 @@ For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your 
 
 ## Roadmap
 
-v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 adds the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): lockfile-aware dedup suggestions, `--why`, baselines & `--compare` (v0.4); health score, license scan, treemap export (v0.5).
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 adds the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): true lockfile parsing (pnpm/yaml-grade graphs), health score, license scan, treemap export (v0.5).
 
 ## Development
 

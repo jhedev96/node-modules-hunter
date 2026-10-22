@@ -436,8 +436,7 @@ Fase	Fitur
 MVP (v0.1)	scan, size, delete hard/trash, wizard, help/version, guards dasar, npm/pnpm detect	
 v0.2	✅ SELESAI — search (+--search), map (+--tree/--depend declared-level), --pm filter semua PM incl. tag [vp], -r recursive audit, --exclude/--keep/--depth/--expand (85 test hijau)	
 v0.3	✅ SELESAI — `stats` dasar (rank per-installation Σ size, dup factor instances/unique, waste dedup khusus versi-identik via lower-median, top-N + `--top`, per-package size di `--tree`; `--by type` → v0.4 warning+fallback), `stats -g` global lintas PM (probe `root -g`/`yarn global dir`/`bun pm -g` + fallback path, top-level only + versi, dead bin-symlink check, savings lintas-PM = min size, read-only tanpa elevate), `--save-report`/`--report` (scan-only, `.json`/`.md`/`.txt` by extension, gagal menulis tidak mengubah exit code), `--animate` (auto = hanya TTY, selalu mati di `--json`, config `animate:false`), config `.nmhrc`/`.nmhrc.json` + `--config` (114 test hijau)	
-v0.4	lockfile-aware dedup suggestion, `--depend` enriched (inbound map), `--why`, phantom/dead deps audit, baseline & `--compare`	
-v0.4	lockfile-aware dedup suggestion ("package X ada 14 copy, 300 MB bisa dihemat"), update-check	
+v0.4	✅ SELESAI — baseline & compare (`--save-baseline`/`--compare`/`--history`: snapshot totals + per-package di `~/.nmh/baselines/<name>.json` schema 1, delta total/per-node_modules/`package movers`, warning pertumbuhan >30%, nama divalidasi tanpa path-traversal), dedup suggestion (per-copy: node_modules host + PM + size + manifest project & range per dep-field, hint bijak: range sama → hoist/dedupe, beda → sejajarkan manifest dulu, tanpa deklarasi → transitif; symlink tidak pernah terhitung sebagai copy yang dapat di-dedup), `--why`/`nmh why` (instansi + deklarasi + required-by dari manifest **sendiri** tiap sibiling tanpa nenek moyang; orphan ditandai; linked tanpa size), `--by type` sungguhan (bucket per dep-field terdeklarasi + `transitif`, view terfokus), `--phantom`/`--dead` audit regex (node:/./subpath/@scope dilipat, peer tidak pernah dead, fokus per-flag, JSON membawa keduanya), `--update-check` (opt-in, cache 24 jam, env escape hatch `NMH_REGISTRY_JSON` untuk mirror/test, gagal sunyi tidak mengubah exit code) — level manifest; parser lockfile penuh (pnpm/yaml) → v0.5. 137 test hijau
 v0.5	Bloat/Health Score, license scan, deprecated check (`--online`), treemap export, `--co2` estimate	
 v1.0	stabil API, docs lengkap, publish npm	
 
@@ -453,12 +452,13 @@ v1.0	stabil API, docs lengkap, publish npm
 - `--dry-run` tidak melakukan penghapusan sama sekali (testable: hitung folder sebelum/sesudah).
 - Exit codes sesuai §6.8.
 - Non-TTY mode tidak hang menunggu input.
-- Test suite (unit + e2e lewat binary asli) hijau penuh: 36 test saat v0.1, 85 test saat v0.2, 114 test saat v0.3 — fixture monorepo deterministik berisi keempat keluarga PM, symlink pnpm, `.pnpm` store, nested `node_modules`, dan victim symlink-loop (guard ELOOP).
+- Test suite (unit + e2e lewat binary asli) hijau penuh: 36 test saat v0.1, 85 test saat v0.2, 114 test saat v0.3, 137 test saat v0.4 — fixture monorepo deterministik berisi keempat keluarga PM, symlink pnpm, `.pnpm` store, nested `node_modules`, dan victim symlink-loop (guard ELOOP).
 - `nmh stats <dir>` menghasilkan: total size, instance vs unique count, duplication factor, waste size, top-5 per size — dan angka size konsisten dengan `--size total` (selisih <2%).
-- `--compare` menampilkan delta yang benar terhadap baseline tersimpan.
+- `--compare` menampilkan delta yang benar terhadap baseline tersimpan (committed: `--save-baseline`, `--compare`, `--history`).
 - `nmh stats [dir]` tanpa subflag mencetak seluruh seksi report (bukan ringkasan terpilih).
 - `nmh stats -g` berjalan read-only tanpa `[dir]`, menampilkan semua package global lintas PM, menampilkan warning permission sesuai §6.5, dan tidak auto-elevate sudo.
-- v0.3 tamat: `stats` & `stats -g`, report export scan-only, `--animate` gate, config file (§10) — kriteria `--compare`/baseline (§8.3, tinta v0.4) tidak termasuk.
+- v0.3 tamat: `stats` & `stats -g`, report export scan-only, `--animate` gate, config file (§10) — kriteria `--compare`/baseline (§8.3) termasuk di v0.4.
+- v0.4 tamat: baseline & compare & history, dedup suggestion (level manifest-range), `--why` (required-by dari manifest sendiri), `--by type` sungguhan, `--phantom`/`--dead` audit best-effort, `--update-check` opt-in.
 
 ---
 
@@ -469,7 +469,7 @@ v1.0	stabil API, docs lengkap, publish npm
 | 1 | Nama bin final? | `nmh` bin utama + alias `node-modules-hunter` — dua-duanya terpasang. |
 | 2 | Default delete mode di wizard? | `trash` (aman), pre-highlighted; user tetap bebas ganti mode. |
 | 3 | Lockfile vp (vite+)? | vp adalah **wrapper, bukan package manager** — tidak ada `vp-lock.yaml`. Deteksi lewat manifest (deklarasi `vite-plus` / `@voidzero-dev/vite-plus-core`), hasilnya tag `[vp]` di atas PM dasar yang sah. |
-| 4 | Suggestion dedup diprioritaskan? | Tidak — tetap v0.4 (lockfile-aware). |
+| 4 | Suggestion dedup diprioritaskan? | Tidak — tetap v0.4, tetap "lockfile-aware" **level manifest**: analisa per-copy pakai range yang dideklarasi project (klim menuju manifest penanda), bukan parser lockfile penuh; tabel pnpm-lock.yaml/yarn.lock bisa memperdalam di v0.5. |
 | 5 | Logging `~/.nmh/logs/`? | DEFAULT ON untuk setiap operasi delete (hard maupun trash) → `~/.nmh/logs/delete-*.json` (recovery reference). |
 | 6 | CO2 & Bloat Score resmi? | Flag experimental saat fiturnya dibangun (v0.5) — bukan metrik resmi di output normal. |
 | 7 | Phantom/dead: regex atau parser? | Best-effort regex tanpa dependency baru; parser "beneran" ditunda sampai ada kebutuhan nyata. |
@@ -477,8 +477,10 @@ v1.0	stabil API, docs lengkap, publish npm
 | 9 | Cakupan `stats -g` (§8.4)? | Read-only via command `stats -g` (+ `--pm`): probe root global per PM (`npm root -g`, `pnpm root -g`, `yarn global dir`, `bun pm -g`) dengan fallback path bawaan, hanya paket top-level (nama+versi+size); dedup lintas-PM pakai size instance pertama, savings = min; dead global = cek symlink bin per manifest (best-effort, tanpa sudo). |
 | 10 | Cakupan `--save-report`/`--report`? | Hanya `scan` (map/search/stats menyusul di v0.4): salin output yang dicetak ke file, format dari ekstensi `.json`/`.md`/`.txt`; `.md`/`.txt` dipulu strip ANSI, `.json` = payload `--json`; gagal menulis = warning, exit code tidak berubah. |
 | 11 | Gate `--animate`? | `auto` = hanya TTY; `--animate` memaksa on meski pipe (argv-explicit menang atas cac default maupun config), `--json` selalu mematikan counter biar stdout tetap bersih; `.nmhrc animate:false` mematikan default. |
+| 12 | Semantik required-by `--why` (§8.6#5)? | Requirer diambil dari **manifest-nya sendiri saja** (own-manifest), tanpa klim ke manifest leluhur — project yang menyatakan lodash tidak disalahkan ke semua sibling; deklarasi project-level dihitung terpisah (klim `depSpecFor`); orphan copy diberi label; instansi symlink dicantumkan tapi tanpa size. |
+| 13 | `--update-check` cache/reachable? | Opt-in (flag atau `.nmhrc updateCheck:true`), cache `~/.nmh/cache/update-check.json` 24 jam, notice **stderr** (stdout tetap bersih untuk `--json`), kegagalan jaringan sunyi + tidak mengubah exit code; env `NMH_REGISTRY_JSON` menunjuk registry lain (mirror/test). |
 
-Status: v0.1 MVP + v0.2 (search & `--search`, map & `--tree` & `--depend` declared-level, `--pm` incl. tag `[vp]`, `-r`, `--exclude`, `--keep`, `--depth`, `--expand`) + v0.3 (`stats` dasar & `stats -g`, report export scan-only, `--animate`, config file) selesai — suite 114 test hijau (unit + e2e via binary asli).
+Status: v0.1 MVP + v0.2 (search & `--search`, map & `--tree` & `--depend` declared-level, `--pm` incl. tag `[vp]`, `-r`, `--exclude`, `--keep`, `--depth`, `--expand`) + v0.3 (`stats` dasar & `stats -g`, report export scan-only, `--animate`, config file) + v0.4 (baseline & compare & history, dedup suggestion manifest-level, `--why`, `--by type`, `--phantom`/`--dead`, `--update-check`) selesai — suite 137 test hijau (unit + e2e via binary asli).
 
 ---
 

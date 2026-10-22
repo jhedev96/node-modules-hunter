@@ -16,6 +16,8 @@ export interface NmhConfig {
   keep: string[]
   color: boolean
   animate: boolean
+  /** --update-check opt-in from the config file (PRD §5.5); CLI flag wins the same way. */
+  updateCheck?: boolean
   /** Tilde-expanded recovery-log directory. */
   logDir: string
 }
@@ -68,6 +70,7 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
         break
       case 'color':
       case 'animate':
+      case 'updateCheck':
         if (typeof value !== 'boolean') {
           throw new ConfigError(`invalid config: ${file}: ${key} must be true or false (got ${JSON.stringify(value)})`)
         }
