@@ -162,9 +162,9 @@ export async function readNpmLockGraph(projectDir: string, file = 'package-lock.
   return buildGraph('npm', file, parsed)
 }
 
-/** First usable lockfile wins — npm, then yarn v1, then pnpm; bun lands later. */
+/** First usable lockfile wins — npm, yarn v1, pnpm, then bun text lockfiles. */
 export async function readProjectLockGraph(projectDir: string): Promise<LockGraph | null> {
-  return (await readNpmLockGraph(projectDir)) ?? (await readYarnLockGraph(projectDir)) ?? (await readPnpmLockGraph(projectDir)) ?? null
+  return (await readNpmLockGraph(projectDir)) ?? (await readYarnLockGraph(projectDir)) ?? (await readPnpmLockGraph(projectDir)) ?? (await readBunLockGraph(projectDir)) ?? null
 }
 
 /**
@@ -442,6 +442,140 @@ function collectPnpmNodes(section: Record<string, MiniYamlValue>, edges: LockEdg
       // 6.x values are plain resolved versions; 9.0 may carry specifiers — either
       // is an honest edge label; 'link:' aliases get their literal text
       edges.push({ from: name, to: nameOfSpecKey(to) ?? to, range: typeof range === 'string' ? range : '' })
+    }
+  }
+}
+
+/**
+ * bun.lock (Bun ≥ 1.2 writes TEXT lockfiles; jsonc-flavored JSON) — workspaces
+ * carry the root deps, packages entries are compact arrays like
+ * `["7.21.4", {}, ["@babel/types@8.0.0"]]` or object maps with `dependencies:`.
+ * Best-effort: dep strings 'name@range' split at their last '@'; shapes outside
+ * these two encodings yield nodes without edges. bun.lockb (binary) is NOT
+ * parsed here → null, manifest-grade, said honestly in the output.
+ */
+export async function readBunLockGraph(projectDir: string): Promise<LockGraph | null> {
+  let text: string
+  try {
+    const stat = await fs.stat(path.join(projectDir, 'bun.lock'))
+    if (!stat.isFile() || stat.size > MAX_LOCKFILE_BYTES) return null
+    text = await fs.readFile(path.join(projectDir, 'bun.lock'), 'utf8')
+  } catch {
+    return null
+  }
+  let doc: unknown
+  try {
+    doc = JSON.parse(stripJsonC(text))
+  } catch {
+    return null
+  }
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return null
+  const parsed = parseBunDoc(doc as Record<string, unknown>)
+  if (parsed === null) return null
+  const graph = buildGraph('bun', 'bun.lock', { edges: parsed.edges, rootDirect: parsed.rootDirect, nodeNames: parsed.nodeNames })
+  return graph
+}
+
+/** Strip line and block comments plus trailing commas (bun.lock is jsonc-ish). */
+export function stripJsonC(text: string): string {
+  let out = ''
+  let quote: '"' | null = null
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]!
+    if (quote !== null) {
+      out += ch
+      if (ch === '\\') {
+        const next = text[i + 1] ?? ''
+        out += next
+        i += 2
+        continue
+      }
+      if (ch === '"') quote = null
+      i += 1
+      continue
+    }
+    if (ch === '"') {
+      quote = ch
+      out += ch
+      i += 1
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i += 1
+      i += 2
+      continue
+    }
+    out += ch
+    i += 1
+  }
+  return out.replace(/,(\s*(?:\}|\]))/g, '$1')
+}
+
+/** Extract nodes/edges from a parsed bun.lock document (workspaces + packages). */
+export function parseBunDoc(doc: Record<string, unknown>): NameEdgeCount | null {
+  const edges: LockEdge[] = []
+  const nodeNames = new Set<string>()
+
+  const packages = doc.packages
+  if (packages === undefined || typeof packages !== 'object' || Array.isArray(packages)) return null
+  for (const [key, value] of Object.entries(packages as Record<string, unknown>)) {
+    const name = nameOfSpecKey(key)
+    if (name === null) continue
+    nodeNames.add(name)
+    // entries may be [version, meta?, deps[]] arrays or { dependencies: {...} } maps
+    if (Array.isArray(value)) {
+      for (const member of value) {
+        if (typeof member === 'string' && member.includes('@')) {
+          const at = member.lastIndexOf('@')
+          if (at > 0 && at < member.length - 1) edges.push({ from: name, to: member.slice(0, at), range: member })
+        } else if (Array.isArray(member)) {
+          for (const dep of member) {
+            if (typeof dep === 'string' && dep.includes('@')) {
+              const at = dep.lastIndexOf('@')
+              if (at > 0 && at < dep.length - 1) edges.push({ from: name, to: dep.slice(0, at), range: dep })
+            }
+          }
+        } else if (member !== null && typeof member === 'object') {
+          collectBunDepMap(name, member as Record<string, unknown>, edges)
+        }
+      }
+    } else if (value !== null && typeof value === 'object') {
+      collectBunDepMap(name, value as Record<string, unknown>, edges)
+    }
+  }
+  if (nodeNames.size === 0) return null
+
+  let rootDirect = 0
+  const workspaces = doc.workspaces
+  if (workspaces !== undefined && typeof workspaces === 'object' && !Array.isArray(workspaces)) {
+    const rootWorkspace = (workspaces as Record<string, unknown>)['.']
+    if (rootWorkspace !== undefined && typeof rootWorkspace === 'object' && !Array.isArray(rootWorkspace)) {
+      for (const field of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+        const map = (rootWorkspace as Record<string, unknown>)[field]
+        if (map === undefined || typeof map !== 'object' || Array.isArray(map)) continue
+        for (const [name, range] of Object.entries(map as Record<string, unknown>)) {
+          if (typeof range !== 'string') continue
+          edges.push({ from: ROOT, to: name, range })
+          rootDirect += 1
+        }
+      }
+    }
+  }
+  return { edges, rootDirect, nodeNames }
+}
+
+function collectBunDepMap(name: string, node: Record<string, unknown>, edges: LockEdge[]): void {
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+    const map = node[field]
+    if (map === undefined || typeof map !== 'object' || Array.isArray(map)) continue
+    for (const [to, range] of Object.entries(map as Record<string, unknown>)) {
+      if (typeof range === 'string') edges.push({ from: name, to, range })
     }
   }
 }
