@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { scanForNodeModules } from '../src/core/walker.ts'
 import { measureEntry } from '../src/core/sizer.ts'
-import { monorepoFixture, type MonorepoFixture } from './helpers.ts'
+import { monorepoFixture, tmpRoot, type MonorepoFixture } from './helpers.ts'
 
 const KB = 1024
 
@@ -35,6 +35,41 @@ describe('scanForNodeModules', () => {
       expect(shallow.entries).toEqual([])
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('wide bushy workspace tree never deadlocks (v0.7.1 regression: recursive limiter circular wait)', async () => {
+    const root = await tmpRoot('walker-bushy')
+    try {
+      // Geometry that froze v0.1–v0.7.0: N packages × node_modules × bushy subdirs —
+      // running chains all await children queued behind saturated slots → silent exit 0.
+      const PACKAGES = 12
+      const SUBDIRS = 6
+      const LEAVES = 6
+      const dirs: Promise<unknown>[] = []
+      const manifests: Array<{ where: string; body: string }> = []
+      for (let p = 0; p < PACKAGES; p += 1) {
+        const nm = path.join(root, `p${p}`, 'node_modules')
+        for (let s = 0; s < SUBDIRS; s += 1) {
+          for (let m = 0; m < LEAVES; m += 1) {
+            dirs.push(fs.mkdir(path.join(nm, `s${s}`, `m${m}`), { recursive: true }))
+          }
+        }
+        manifests.push({ where: path.join(root, `p${p}`, 'package.json'), body: `{"name":"p${p}"}` })
+      }
+      // Await every mkdir before starting any write — a pushed writeFile promise
+      // begins immediately, which raced fresh-mount mkdirs into ENOENT once.
+      await Promise.all(dirs)
+      await Promise.all(manifests.map((file) => fs.writeFile(file.where, file.body)))
+
+      const started = Date.now()
+      const { entries } = await scanForNodeModules([root], { maxDepth: 3 })
+      expect(Date.now() - started).toBeLessThan(30_000)
+      expect(entries.filter((entry) => entry.nested)).toHaveLength(0)
+      expect(entries).toHaveLength(PACKAGES)
+      expect(entries.every((entry) => entry.ownerPath === entry.path)).toBe(true)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
     }
   })
 

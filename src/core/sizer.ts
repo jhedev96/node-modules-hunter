@@ -7,7 +7,8 @@ import { isPermissionError } from './walker.ts'
 
 export interface EntryMeasure {
   /** Bytes of real files only. Symlinks are never followed, so a pnpm virtual store
-   *  (`.pnpm` symlink farm) is counted once — through its real files. */
+   *  (`.pnpm` symlink farm) is counted once — through its real files. Files hardlinked
+   *  within the entry (pnpm store dedupe) count once per inode, du-style. */
   size: number
   /** Top-level packages: plain dirs + symlinked dirs counted as packages; scopes expanded. */
   packageCount: number
@@ -32,6 +33,10 @@ export async function measureEntry(
 ): Promise<EntryMeasure> {
   const limiter = createLimiter(8)
   let size = 0
+  // Hardlink dedupe, du-style, scoped to ONE entry: the same inode linked under
+  // several .pnpm paths counts once here. Cross-entry sharing (a global pnpm
+  // store) stays out of scope — each entry is a separately deletable unit.
+  const seenHardlinks = new Set<string>()
 
   let frontier: string[] = [entryPath]
   while (frontier.length > 0) {
@@ -48,17 +53,24 @@ export async function measureEntry(
             return // vanished or unreadable — skip
           }
           for (const dirent of dirents) {
-            if (dirent.isSymbolicLink()) continue // hard rule: never follow links
-            if (!dirent.isDirectory() && !dirent.isFile()) continue
+            // Classify via lstat, never via dirent d_type. Some filesystems (FUSE /
+            // sdcardfs on Android; hardlink-heavy pnpm stores) report plain FILE
+            // dirents as symlinks — trusting d_type silently skipped 112 of 125
+            // entries in one typescript/lib dir (folder measured 650 KB while du
+            // showed 66 MB). lstat also keeps the hard rule intact: a real symlink
+            // still reports as a symlink and is never followed.
             const full = path.join(dir, dirent.name)
-            if (dirent.isDirectory()) {
+            const st = await fs.lstat(full).catch(() => null)
+            if (st === null) continue // vanished or unreadable — skip
+            if (st.isDirectory()) {
               frontier.push(full)
-            } else {
-              const st = await fs.stat(full).then(
-                (value) => value,
-                () => null,
-              )
-              if (st?.isFile()) size += Number(st.size)
+            } else if (st.isFile()) {
+              if (st.nlink > 1 && st.ino !== 0) {
+                const key = `${st.dev}:${st.ino}`
+                if (seenHardlinks.has(key)) continue
+                seenHardlinks.add(key)
+              }
+              size += Number(st.size)
             }
           }
         }),

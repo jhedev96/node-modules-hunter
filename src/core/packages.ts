@@ -125,7 +125,14 @@ export async function listTopLevelPackages(entryPath: string): Promise<PackageRe
     if (dirent.name.startsWith('.')) continue // .pnpm, .bin, .cache, …
     const full = path.join(entryPath, dirent.name)
 
-    if (dirent.isDirectory()) {
+    // Classify via lstat, never via dirent d_type (same filesystem lie as the
+    // walker/sizer): a plain package dir mislabeled as a symlink would vanish
+    // from the package list. lstat keeps real symlinks distinguishable so the
+    // pnpm-style link handling below stays exact.
+    const st = await fs.lstat(full).catch(() => null)
+    if (st === null) continue // vanished or unreadable — skip
+
+    if (st.isDirectory()) {
       if (dirent.name.startsWith('@')) {
         let members: Dirent<string>[]
         try {
@@ -135,14 +142,16 @@ export async function listTopLevelPackages(entryPath: string): Promise<PackageRe
         }
         for (const member of members) {
           if (member.name.startsWith('.')) continue
-          if (member.isDirectory() || member.isSymbolicLink()) {
-            refs.push({
-              name: `${dirent.name}/${member.name}`,
-              path: path.join(full, member.name),
-              scope: dirent.name,
-              symlinked: member.isSymbolicLink(),
-            })
-          }
+          const memberFull = path.join(full, member.name)
+          const mst = await fs.lstat(memberFull).catch(() => null)
+          if (mst === null) continue // vanished or unreadable — skip
+          if (!mst.isDirectory() && !mst.isSymbolicLink()) continue
+          refs.push({
+            name: `${dirent.name}/${member.name}`,
+            path: memberFull,
+            scope: dirent.name,
+            symlinked: mst.isSymbolicLink(),
+          })
         }
         continue
       }
@@ -150,13 +159,13 @@ export async function listTopLevelPackages(entryPath: string): Promise<PackageRe
       continue
     }
 
-    if (dirent.isSymbolicLink()) {
+    if (st.isSymbolicLink()) {
       // pnpm-style top-level links point at real package dirs; count them if they really are dirs.
-      const st = await fs.stat(full).then(
+      const target = await fs.stat(full).then(
         (value) => value,
         () => null,
       )
-      if (st?.isDirectory()) {
+      if (target?.isDirectory()) {
         refs.push({ name: dirent.name, path: full, scope: null, symlinked: true })
       }
     }

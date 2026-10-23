@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Dirent } from 'node:fs'
-import { createLimiter } from '../utils/limit.ts'
 import { makeGlobMatcher } from '../utils/match.ts'
 
 export interface WalkEntry {
@@ -35,6 +34,12 @@ export interface WalkOptions {
  * - Skips `.git`; never follows symlinks (cycle/loop traversal impossible; pnpm-safe).
  * - A found node_modules becomes an owned entry, not a diving board — unless `recursive`.
  * - Walker entries are real dirs; overlapping roots collapse via the visited set.
+ *
+ * Scheduling (v0.7.1): each concurrency slot runs ONE readdir as its whole task — a
+ * task NEVER awaits children. Holding a slot across a subtree would eventually
+ * deadlock: bursts of readdir results saturate every slot with parents whose children
+ * are all queued behind them (circular wait), which froze wide bushy pnpm trees
+ * (12 packages × bushy node_modules) with NOTHING printed and exit 0 mid-walk.
  */
 export async function scanForNodeModules(roots: string[], options: WalkOptions = {}): Promise<WalkOutcome> {
   const maxDepth = options.maxDepth ?? Number.POSITIVE_INFINITY
@@ -44,55 +49,89 @@ export async function scanForNodeModules(roots: string[], options: WalkOptions =
   const entries: WalkEntry[] = []
   const permissionIssues: string[] = []
   const visited = new Set<string>()
-  const limiter = createLimiter(16)
+  const CONCURRENCY = 16
 
-  const makeWalker = (root: string) => {
-    const walk = async (dir: string, depth: number, owner: string | null): Promise<void> => {
-      if (visited.has(dir)) return
-      visited.add(dir)
-
-      let dirents: Dirent<string>[]
-      try {
-        dirents = await fs.readdir(dir, { withFileTypes: true })
-      } catch (err) {
-        if (isPermissionError(err)) permissionIssues.push(dir)
-        return // vanished or unreadable — skip
-      }
-
-      const subdirs: Array<{ dir: string; depth: number; owner: string | null }> = []
-      for (const dirent of dirents) {
-        if (dirent.name === '.git') continue
-        if (dirent.isSymbolicLink()) continue // never follow links while walking
-        if (!dirent.isDirectory()) continue
-
-        const child = path.join(dir, dirent.name)
-        const childDepth = depth + 1
-        if (childDepth > maxDepth) continue
-
-        if (isExcluded) {
-          const relative = path.relative(root, child)
-          if (isExcluded(child) || isExcluded(relative) || isExcluded(dirent.name)) continue
-        }
-
-        if (dirent.name === 'node_modules') {
-          const entry: WalkEntry = owner
-            ? { path: child, ownerPath: owner, nested: true }
-            : { path: child, ownerPath: child, nested: false }
-          entries.push(entry)
-          options.onFound?.(entry)
-          if (recursive) subdirs.push({ dir: child, depth: childDepth, owner: owner ?? child })
-          continue
-        }
-        subdirs.push({ dir: child, depth: childDepth, owner })
-      }
-
-      await Promise.all(subdirs.map((sub) => limiter(() => walk(sub.dir, sub.depth, sub.owner))))
-    }
-    return walk
+  interface Job {
+    dir: string
+    /** The walk root this chain descended from (exclude globs match relative to it). */
+    root: string
+    depth: number
+    owner: string | null
   }
 
-  await Promise.all(roots.map((root) => makeWalker(root)(root, 0, options.initialOwner ?? null)))
-  return { entries, permissionIssues }
+  const queue: Job[] = roots.map((root) => ({ dir: root, root, depth: 0, owner: options.initialOwner ?? null }))
+  let active = 0
+  let failure: unknown = null
+
+  return await new Promise<WalkOutcome>((settle) => {
+    const maybeFinish = (): void => {
+      if (active === 0 && queue.length === 0) {
+        settle({ entries, permissionIssues })
+      }
+    }
+    const pump = (): void => {
+      while (active < CONCURRENCY && queue.length > 0) {
+        const job = queue.shift() as Job
+        active += 1
+        void processDir(job)
+      }
+      maybeFinish()
+    }
+    const processDir = async (job: Job): Promise<void> => {
+      try {
+        if (visited.has(job.dir)) return
+        visited.add(job.dir)
+
+        let dirents: Dirent<string>[]
+        try {
+          dirents = await fs.readdir(job.dir, { withFileTypes: true })
+        } catch (err) {
+          if (isPermissionError(err)) permissionIssues.push(job.dir)
+          return // vanished or unreadable — skip
+        }
+
+        for (const dirent of dirents) {
+          if (dirent.name === '.git') continue
+          const child = path.join(job.dir, dirent.name)
+          // Classify with lstat, same reason as the sizer: d_type lies on some
+          // filesystems, and trusting it would hide real dirs (a missed
+          // node_modules). lstat does not follow entries, so the "never follow
+          // symlinks" rule holds by construction.
+          const st = await fs.lstat(child).catch(() => null)
+          if (st === null) continue // vanished or unreadable — skip
+          if (!st.isDirectory()) continue // files and symlinks: never followed
+
+          const childDepth = job.depth + 1
+          if (childDepth > maxDepth) continue
+
+          if (isExcluded) {
+            const relative = path.relative(job.root, child)
+            if (isExcluded(child) || isExcluded(relative) || isExcluded(dirent.name)) continue
+          }
+
+          if (dirent.name === 'node_modules') {
+            const entry: WalkEntry = job.owner
+              ? { path: child, ownerPath: job.owner, nested: true }
+              : { path: child, ownerPath: child, nested: false }
+            entries.push(entry)
+            options.onFound?.(entry)
+            if (recursive) queue.push({ dir: child, root: job.root, depth: childDepth, owner: job.owner ?? child })
+            continue
+          }
+          queue.push({ dir: child, root: job.root, depth: childDepth, owner: job.owner })
+        }
+      } catch (err) {
+        if (failure === null) failure = err
+      } finally {
+        active -= 1
+        pump()
+      }
+    }
+    pump()
+  }).then((outcome) => {
+    if (failure !== null) throw failure
+    return outcome
+  })
 }
 
 export function isPermissionError(err: unknown): boolean {
