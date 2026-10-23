@@ -62,6 +62,7 @@ cli.option('--licenses', 'stats only: bucket installed instances by their licens
 cli.option('--score', 'stats only: experimental composite bloat score 0-100 (waste % + dup factor + dead % + size)')
 cli.option('--co2', 'stats only: experimental carbon estimate (storage-year + one redownload)')
 cli.option('--online', 'stats only: deprecated scan — offline manifest data + lazy cached registry fallback for missing notes')
+cli.option('--graph', 'stats only: dependency graph from the project lockfile (npm package-lock v2/v3) — direct/transitive, edges, depth')
 cli.option('--treemap [file]', 'treemap export: single-file HTML (vanilla JS, no deps); default nmh-treemap.html in cwd')
 cli.option('--out <file>', 'treemap only: where to write the HTML file (same as --treemap <file>)')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
@@ -301,8 +302,8 @@ async function main(): Promise<number> {
         : null
   // statsGiven early so read-only flag guards (below) cover every dispatch, not just stats itself.
   const statsGiven = flags.stats === true || subcommand === 'stats' || subcommand === 'analyze' || subcommand === 'info'
-  if ((flags.phantom === true || flags.dead === true || flags.licenses === true || flags.score === true || flags.co2 === true || flags.online === true) && !statsGiven) {
-    errorLog('--phantom/--dead/--licenses/--score/--co2/--online only work with the stats command — nmh stats --online')
+  if ((flags.phantom === true || flags.dead === true || flags.licenses === true || flags.score === true || flags.co2 === true || flags.online === true || flags.graph === true) && !statsGiven) {
+    errorLog('--phantom/--dead/--licenses/--score/--co2/--online/--graph only work with the stats command — nmh stats --graph')
     return 1
   }
   if (subcommand === 'search' || searchPattern !== null) {
@@ -469,8 +470,8 @@ async function main(): Promise<number> {
       return 1
     }
     if (globalGiven) {
-      if (treeGiven || flags.top !== undefined || by !== null) {
-        errorLog('--tree/--top/--by shape per-project stats — global mode has its own table')
+      if (treeGiven || flags.top !== undefined || by !== null || flags.graph === true) {
+        errorLog('--tree/--top/--by/--graph shape per-project stats — global mode has its own table')
         return 1
       }
       const globalTargets = [...rest, ...dirTargets]
@@ -511,6 +512,7 @@ async function main(): Promise<number> {
       score: flags.score === true,
       co2: flags.co2 === true,
       online: flags.online === true,
+      graph: flags.graph === true,
       saveReport: reportPath ?? undefined,
     })
   }

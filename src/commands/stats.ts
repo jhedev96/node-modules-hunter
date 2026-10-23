@@ -14,13 +14,14 @@ import {
 } from '../utils/baseline.ts'
 import { toolVersion } from '../utils/version.ts'
 import { collectDepsAudit } from '../core/deps-audit.ts'
+import { readNpmLockGraph, type LockGraph } from '../core/lockfile.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, deprecatedOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
 import { registryDeprecated, registryDeprecatedCacheDir, MAX_REGISTRY_DEPRECATED_FETCHES } from '../utils/registry-deprecated.ts'
-import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
+import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, GraphEntryRow, GraphOutcome, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -56,6 +57,8 @@ export interface StatsRequest {
   co2?: boolean
   /** --online: deprecated scan of installed manifests + lazy registry fallback for missing notes. */
   online?: boolean
+  /** --graph: lockfile-grade dependency graph (npm package-lock v2/v3, per project). */
+  graph?: boolean
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -112,7 +115,10 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
         )
         measuredEntries += 1
         progressLine(`⠋ analyzing ${measuredEntries}/${entryCount} node_modules…`)
-        return { entry, project, topPackages, declared }
+        const graph = request.graph === true
+          ? await readNpmLockGraph(declared?.projectDir ?? path.dirname(entry.path))
+          : undefined
+        return { entry, project, topPackages, declared, graph }
       }),
     ),
   )
@@ -211,6 +217,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
 
   const score = request.score === true ? buildScore(overview, depsAudit?.dead.length ?? 0) : null
   const co2 = request.co2 === true ? buildCo2(overview) : null
+  const graph = request.graph === true ? buildGraphOutcome(projectsResults) : null
   const deprecations = request.online === true
     ? await collectDeprecations(projectsResults, {
         cacheDir: registryDeprecatedCacheDir(),
@@ -222,7 +229,46 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, score, co2, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, graph, score, co2, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
+}
+
+/**
+ * --graph (PRD §8.2, v0.6): merge per-entry lockfile graphs into one focused
+ * outcome. Entries without a usable lockfile keep row grade 'manifest' with
+ * zeroed numbers, so the report can honestly say what is and is not covered.
+ */
+export function buildGraphOutcome(projects: MapProjectInfo[]): GraphOutcome {
+  const entries: GraphEntryRow[] = projects.map((project) => {
+    const graph = project.graph
+    return {
+      displayPath: project.entry.displayPath,
+      pm: project.entry.pm.family,
+      file: graph?.file ?? null,
+      grade: graph !== null && graph !== undefined ? 'full' : 'manifest',
+      rootDirect: graph?.rootDirect ?? 0,
+      nodes: graph?.nodes ?? 0,
+      edges: graph?.edges ?? 0,
+    }
+  })
+  const histogram = new Map<number, number>()
+  let unreachable = 0
+  for (const project of projects) {
+    if (project.graph === null || project.graph === undefined) continue
+    for (const bucket of project.graph.depthHistogram) {
+      histogram.set(bucket.depth, (histogram.get(bucket.depth) ?? 0) + bucket.packages)
+    }
+    unreachable += project.graph.unreachable
+  }
+  return {
+    totalEntries: entries.length,
+    fullEntries: entries.filter((row) => row.grade === 'full').length,
+    rootDirect: entries.reduce((sum, row) => sum + row.rootDirect, 0),
+    edges: entries.reduce((sum, row) => sum + row.edges, 0),
+    nodes: entries.reduce((sum, row) => sum + row.nodes, 0),
+    depthHistogram: [...histogram].sort((a, b) => a[0] - b[0]).map(([depth, packages]) => ({ depth, packages })),
+    unreachable,
+    entries,
+  }
 }
 
 /**

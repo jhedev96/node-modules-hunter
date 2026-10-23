@@ -1,3 +1,5 @@
+import type { LockGraph } from './lockfile.ts'
+
 export type PMFamily = 'npm' | 'pnpm' | 'yarn' | 'bun' | 'unknown'
 
 export interface PMInfo {
@@ -78,6 +80,8 @@ export interface MapProjectInfo {
   project: string | null
   topPackages: MapPackageRef[]
   declared: MapDeclared | null
+  /** Lockfile-grade graph when --graph ran (stats-only byproduct, like license above). */
+  graph?: LockGraph | null
 }
 
 export interface MapOutcome {
@@ -143,6 +147,38 @@ export interface DedupSuggestion {
   instances: DedupInstanceDetail[]
 }
 
+/**
+ * --graph (PRD §8.2, v0.6): per-entry graph rows from the project lockfile.
+ * grade 'manifest' = no usable lockfile (or the flag never ran) — numbers stay 0.
+ */
+export interface GraphEntryRow {
+  displayPath: string
+  pm: string
+  /** File part of the parsed lockfile, e.g. 'package-lock.json'; null = manifest-grade. */
+  file: string | null
+  grade: 'full' | 'manifest'
+  rootDirect: number
+  nodes: number
+  edges: number
+}
+
+export interface GraphOutcome {
+  totalEntries: number
+  /** Entries whose graph came from a real lockfile. */
+  fullEntries: number
+  /** Σ direct deps declared by every project root (lockfile view). */
+  rootDirect: number
+  /** Σ dependency edges across entries. */
+  edges: number
+  /** Σ distinct tree nodes across entries. */
+  nodes: number
+  /** Merged BFS depth histogram (hop counts summed per depth bucket). */
+  depthHistogram: Array<{ depth: number; packages: number }>
+  /** Σ tree nodes no edge path reaches (peers/optional pruning). */
+  unreachable: number
+  entries: GraphEntryRow[]
+}
+
 export interface StatsOutcome {
   /** 0 report produced, 2 nothing found, 4 partial permission issues. */
   code: number
@@ -156,6 +192,8 @@ export interface StatsOutcome {
   typeBreakdown: StatsTypeBreakdown[]
   /** --licenses: per-license buckets (empty when the flag is absent). */
   licenseBreakdown: StatsLicenseRow[]
+  /** --graph: lockfile-grade dependency graph (null when the flag is absent). */
+  graph: GraphOutcome | null
   /** --score: composite bloat score (null when the flag is absent). */
   score: BloatScore | null
   /** --co2: order-of-magnitude carbon estimate (null when the flag is absent). */
@@ -262,6 +300,11 @@ export interface WhyInstanceInfo {
   declaredBy: { projectName: string | null; range: string; field: string } | null
   /** Sibling packages whose manifests name the target (best-effort required-by). */
   requiredBy: Array<{ name: string; version: string | null; range: string; field: string }>
+  /**
+   * Where requiredBy came from: 'lockfile' = dependency-graph edges (richer, covers
+   * transitive requirers), 'manifest' = top-level sibling manifests only.
+   */
+  requiredByGrade: 'manifest' | 'lockfile'
 }
 
 export interface WhyOutcome {

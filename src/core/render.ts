@@ -453,6 +453,8 @@ export interface RenderStatsOptions {
   by: 'package' | 'size' | 'type' | 'licenses' | null
   /** --licenses (or --by licenses): show + focus the LICENSES section. */
   licenses?: boolean
+  /** --graph: show + focus the lockfile-grade GRAPH section. */
+  graph?: boolean
   /** --phantom/--dead focus: which halves of the audit to show. */
   audit?: 'phantom' | 'dead' | 'both' | null
 }
@@ -550,9 +552,37 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
+  if (outcome.graph !== null) {
+    // --graph focus (PRD §8.2 v0.6): lockfile-grade dependency graph per entry
+    lines.push('')
+    lines.push(
+      `━━━ ${colors.bold('GRAPH')} ━━━ ${colors.dim(outcome.graph.fullEntries === outcome.graph.totalEntries ? '(lockfile-grade)' : `${colors.yellow(`${outcome.graph.fullEntries}/${outcome.graph.totalEntries}`)} lockfile-grade — sisanya manifest-grade`)}`,
+    )
+    lines.push(
+      `root direct   : ${outcome.graph.rootDirect} declared → ${outcome.graph.nodes} tree nodes via ${outcome.graph.edges} edges`,
+    )
+    if (outcome.graph.depthHistogram.length === 0) {
+      lines.push(colors.dim('tidak ada kedalaman yang bisa dilacak dari root — bisa jadi lockfile ini v1/pecah'))
+    }
+    for (const bucket of outcome.graph.depthHistogram) {
+      const filled = Math.max(1, Math.min(20, bucket.packages))
+      lines.push(`depth ${String(bucket.depth).padStart(2)}    : ${'█'.repeat(filled).padEnd(20)} ${bucket.packages}`)
+    }
+    if (outcome.graph.unreachable > 0) {
+      lines.push(colors.dim(`+ ${outcome.graph.unreachable} node(s) unreachable from the root (optional/peer pruning)`))
+    }
+    for (const row of outcome.graph.entries) {
+      const detail = row.grade === 'full'
+        ? `${row.file} · ${row.nodes} nodes · ${row.edges} edges · direct ${row.rootDirect}`
+        : colors.dim('no usable lockfile — manifest-grade')
+      lines.push(`· ${row.displayPath}  ${colors.dim(row.pm)} ${detail}`)
+    }
+  }
+
   const focused =
     options.by === 'type' || options.by === 'licenses' || options.licenses === true ||
     outcome.score !== null || outcome.co2 !== null || outcome.deprecations !== null ||
+    outcome.graph !== null ||
     (options.audit ?? null) !== null
 
   if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
@@ -609,13 +639,13 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
 
 export function renderStatsJson(
   outcome: StatsOutcome,
-  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean; online?: boolean },
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean; online?: boolean; graph?: boolean },
   extra?: { baseline?: BaselineJsonExtra },
 ): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.licenses === true ? 'licenses' : request.online === true ? 'deprecated' : 'report'),
+    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.graph === true ? 'graph' : request.licenses === true ? 'licenses' : request.online === true ? 'deprecated' : 'report'),
     baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
@@ -623,6 +653,7 @@ export function renderStatsJson(
     dedupSuggestions: outcome.dedupSuggestions,
     typeBreakdown: outcome.typeBreakdown,
     licenseBreakdown: outcome.licenseBreakdown,
+    graph: outcome.graph,
     score: outcome.score,
     co2: outcome.co2,
     deprecations: outcome.deprecations,
@@ -848,7 +879,8 @@ export function renderWhyReport(outcome: WhyOutcome, options: { cwd: string; exp
       lines.push(colors.dim('  project              : transitive — tidak dideklarasi di manifest manapun'))
     }
     if (instance.requiredBy.length > 0) {
-      lines.push(`  required by          : ${instance.requiredBy.length} package(s)`)
+      const gradeTag = instance.requiredByGrade === 'lockfile' ? colors.dim(' (lockfile-grade)') : ''
+      lines.push(`  required by          : ${instance.requiredBy.length} package(s)${gradeTag}`)
       for (const req of instance.requiredBy.slice(0, 10)) {
         const reqVersion = req.version !== null ? `@${req.version}` : ''
         lines.push(`    · ${req.name}${reqVersion} → ${req.range} (${req.field})`)
@@ -856,6 +888,8 @@ export function renderWhyReport(outcome: WhyOutcome, options: { cwd: string; exp
       if (instance.requiredBy.length > 10) {
         lines.push(colors.dim(`    … plus ${instance.requiredBy.length - 10} more requirer(s)`))
       }
+    } else if (instance.requiredByGrade === 'lockfile') {
+      lines.push(colors.dim('  required by          : no package in the lockfile graph depends on it (root-only copy?)'))
     } else {
       lines.push(colors.dim('  required by          : no package manifest names it — orphan copy'))
     }
@@ -884,7 +918,7 @@ export function renderWhyJson(outcome: WhyOutcome, _request: { cwd: string }): s
 export function renderDepsAudit(audit: DepsAudit, focus: 'phantom' | 'dead' | 'both'): string {
   const lines: string[] = []
   lines.push(`━━━ ${colors.bold('DEPS AUDIT')} ━━━`)
-  lines.push(colors.dim(`· best-effort regex scan — ${audit.scannedFiles} source file(s) (lockfile graph lands later)`))
+  lines.push(colors.dim(`· best-effort regex scan — ${audit.scannedFiles} source file(s) (real graph: nmh stats --graph)`))
   const showPhantom = focus === 'phantom' || focus === 'both'
   const showDead = focus === 'dead' || focus === 'both'
   if (showPhantom && audit.phantom.length === 0 && showDead && audit.dead.length === 0) {

@@ -1,6 +1,8 @@
 import { log, warn, verboseLog } from '../utils/logger.ts'
+import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, createDepClassifier, ownManifestRequires, packageVersion } from '../core/packages.ts'
+import { readNpmLockGraph } from '../core/lockfile.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderWhyReport, renderWhyJson } from '../core/render.ts'
 import type { WhyInstanceInfo, WhyOutcome } from '../core/result.ts'
@@ -22,8 +24,9 @@ export interface WhyRequest {
 /**
  * --why <pkg> (PRD §8.6 #5 / §8.2 reverse depend): for every installed instance of
  * the target, report the owning node_modules, the project/manifest declaration and
- * which sibling packages' manifests mention it. Manifest-level best-effort —
- * lockfile graphs land later; symlinks are never followed.
+ * who requires it. Required-by is lockfile-grade when the project carries a
+ * parseable npm lockfile (v2/v3) — full transitive requirers, field 'lockfile' —
+ * otherwise a best-effort sibling-manifest scan. Symlinks are never followed.
  */
 export async function runWhy(request: WhyRequest): Promise<number> {
   const scan = await collectScan({
@@ -46,16 +49,39 @@ export async function runWhy(request: WhyRequest): Promise<number> {
 
     const declaredBy = await classify(entry.path, request.pkg)
     const targetVersion = await packageVersion(target.path)
-    const requiredByList = await Promise.all(
-      refs
-        .filter((ref) => ref.name !== request.pkg)
-        .map(async (ref) => {
-          const hit = await ownManifestRequires(ref.path, request.pkg)
-          if (hit === null) return null
-          const reqVersion = await packageVersion(ref.path)
-          return { name: ref.name, version: reqVersion, range: hit.range, field: hit.field }
-        }),
-    )
+
+    // Lockfile-grade required-by (PRD §8.2, v0.6): dependency edges cover every
+    // requirer in the project, not just top-level siblings. Names-only edges →
+    // requirer version stays null; falls back to sibling manifests with no
+    // lockfile (grade 'manifest').
+    const lock = await readNpmLockGraph(path.dirname(entry.path))
+    let requiredBy: WhyInstanceInfo['requiredBy']
+    let requiredByGrade: WhyInstanceInfo['requiredByGrade']
+    if (lock !== null) {
+      const seen = new Set<string>()
+      requiredBy = lock.dependencyEdges
+        .filter((edge) => edge.to === request.pkg && edge.from !== '«root»' && edge.from !== request.pkg)
+        .filter((edge) => {
+          if (seen.has(edge.from)) return false
+          seen.add(edge.from)
+          return true
+        })
+        .sort((a, b) => a.from.localeCompare(b.from))
+        .map((edge) => ({ name: edge.from, version: null, range: edge.range, field: 'lockfile' }))
+      requiredByGrade = 'lockfile'
+    } else {
+      requiredByGrade = 'manifest'
+      requiredBy = await Promise.all(
+        refs
+          .filter((ref) => ref.name !== request.pkg)
+          .map(async (ref) => {
+            const hit = await ownManifestRequires(ref.path, request.pkg)
+            if (hit === null) return null
+            const reqVersion = await packageVersion(ref.path)
+            return { name: ref.name, version: reqVersion, range: hit.range, field: hit.field }
+          }),
+      ).then((hits) => hits.flatMap((hit) => (hit === null ? [] : [hit])))
+    }
 
     let size: number | null = null
     if (!target.symlinked) {
@@ -69,9 +95,10 @@ export async function runWhy(request: WhyRequest): Promise<number> {
       symlinked: target.symlinked,
       size,
       declaredBy: declaredBy === null ? null : { projectName: declaredBy.projectName, range: declaredBy.range, field: declaredBy.field },
-      requiredBy: requiredByList.flatMap((hit) => (hit === null ? [] : [hit])),
+      requiredBy,
+      requiredByGrade,
     })
-    verboseLog(`why: ${request.pkg} in ${entry.displayPath} — ${instances[instances.length - 1]!.requiredBy.length} requirer(s)`)
+    verboseLog(`why: ${request.pkg} in ${entry.displayPath} — ${requiredBy.length} requirer(s) (${requiredByGrade})`)
   }
 
   let code = 0
