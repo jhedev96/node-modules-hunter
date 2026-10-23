@@ -301,7 +301,7 @@ function renderSettings(settings: WizardSettings | undefined, scope: WizardScope
     row('keep', list(values.keep)),
     row('logDir', values.logDir ?? '~/.nmh (delete receipts)'),
     '',
-    colors.dim('change with .nmhrc (cwd/home) or CLI flags — README §10 ·'),
+    colors.dim('change with nmh config (set·add·remove·unset) or .nmhrc — README §10 ·'),
     colors.dim('this whole menu also exists as plain commands: nmh clean · nmh search <pattern> · nmh map · nmh stats'),
   ].join('\n')
 }

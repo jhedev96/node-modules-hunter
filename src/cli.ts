@@ -9,6 +9,7 @@ import { setLogDirectory } from './utils/delete-log.ts'
 import { REPORT_EXTENSIONS } from './utils/report.ts'
 import { validateBaselineName } from './utils/baseline.ts'
 import { runScan } from './commands/scan.ts'
+import { runConfigCommand, type ConfigCommandRequest, type ConfigOp } from './commands/config.ts'
 import { runSearch } from './commands/search.ts'
 import { runWhy } from './commands/why.ts'
 import { checkForUpdate } from './utils/update-check.ts'
@@ -67,6 +68,10 @@ cli.option('--reinstall', 'stats only: naive npm-ci-style estimate of the time t
 cli.option('--treemap [file]', 'treemap export: single-file HTML (vanilla JS, no deps); default nmh-treemap.html in cwd')
 cli.option('--out <file>', 'treemap only: where to write the HTML file (same as --treemap <file>)')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
+cli.option('--default-exclude <globs>', 'config family: manage the persisted exclude list (comma list; special value "self")')
+cli.option('--default-keep <pkgs>', 'config family: manage the persisted keep list (comma list; special value "self")')
+cli.option('--default-mode <mode>', 'config family: set the persisted defaultMode (hard | soft | trash)')
+cli.option('--log-dir <dir>', 'config family: set the persisted recovery-log directory (logDir)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -135,10 +140,17 @@ async function main(): Promise<number> {
     if (loaded.source !== null) verboseLog(`config: ${loaded.source}`)
   } catch (err) {
     if (err instanceof ConfigError) {
-      errorLog(err.message)
-      return 1
+      // `nmh config` manages the file itself: a to-be-created --config target only exists
+      // AFTER a write, so the read-phase lookup must not 404 on it (invalid JSON still fails).
+      const configFamilyBypass = positionals[0] === 'config' && err.message.includes('file not found')
+      if (!configFamilyBypass) {
+        errorLog(err.message)
+        return 1
+      }
+      verboseLog('config: read-phase lookup skipped for the config family')
+    } else {
+      throw err
     }
-    throw err
   }
   if (config.logDir !== undefined) setLogDirectory(config.logDir)
 
@@ -200,8 +212,12 @@ async function main(): Promise<number> {
 
   const depth = normalizeDepth(flags.depth)
   if (depth === 'invalid') {
-    errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
-    return 1
+    // in the config family a bare `--depth` is a KEY to unset, not a scan cap —
+    // the numeric validation belongs to scan/delete flows only
+    if (positionals[0] !== 'config') {
+      errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
+      return 1
+    }
   }
 
   const recursive = flags.recursive === true
@@ -294,6 +310,50 @@ async function main(): Promise<number> {
   if (subcommand === 'version') {
     printVersion(json)
     return 0
+  }
+
+  // config: persisted .nmhrc management (v0.9) — info · set · add · remove · unset, prompt-free
+  if (subcommand === 'config') {
+    const ops = new Set<ConfigOp>(['info', 'set', 'add', 'remove', 'unset'])
+    const opRaw = rest[0]
+    if (typeof opRaw !== 'string' || !ops.has(opRaw as ConfigOp)) {
+      errorLog('config needs an op — nmh config info | set | add | remove | unset (take a look: nmh config info)')
+      return 1
+    }
+    if (rest.length > 1) {
+      errorLog(`config ${opRaw} takes no positional args — use flags (--default-exclude …, --depth …)`)
+      return 1
+    }
+    if (deleted.given) {
+      errorLog('--delete does not belong to nmh config — it manages the .nmhrc file, that is all')
+      return 1
+    }
+    // cac negation pairs (lines 37/53) default to `true` in flags even when untouched —
+    // argv sniffing is the only honest "was this flag actually given?" (same as normalizeAnimate).
+    const colorGiven =
+      process.argv.includes('--no-color') ||
+      process.argv.includes('--color') ||
+      process.argv.includes('--color=true') ||
+      process.argv.includes('--color=false')
+    const animateGiven =
+      process.argv.includes('--no-animate') ||
+      process.argv.includes('--animate') ||
+      process.argv.includes('--animate=true') ||
+      process.argv.includes('--animate=false')
+    return runConfigCommand({
+      op: opRaw as ConfigOp,
+      cwd,
+      json,
+      explicitFile: typeof flags.config === 'string' && flags.config.length > 0 ? flags.config : undefined,
+      defaultExclude: flags.defaultExclude as ConfigCommandRequest['defaultExclude'],
+      defaultKeep: flags.defaultKeep as ConfigCommandRequest['defaultKeep'],
+      defaultMode: flags.defaultMode as ConfigCommandRequest['defaultMode'],
+      logDir: flags.logDir as ConfigCommandRequest['logDir'],
+      depth: flags.depth as ConfigCommandRequest['depth'],
+      animate: animateGiven ? (flags.animate as ConfigCommandRequest['animate']) : undefined,
+      color: colorGiven ? (flags.color as ConfigCommandRequest['color']) : undefined,
+      updateCheck: flags.updateCheck as ConfigCommandRequest['updateCheck'],
+    })
   }
 
   // search: subcommand (`nmh search <pattern> [dirs]`) or flag (`--search <pattern>` on any read-only form)

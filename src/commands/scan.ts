@@ -9,6 +9,7 @@ import { scanForNodeModules, type WalkEntry } from '../core/walker.ts'
 import { measureEntries } from '../core/sizer.ts'
 import { createPmDetector } from '../core/pm-detect.ts'
 import { projectNameFor } from '../core/packages.ts'
+import { insideRoot, SELF_TOKEN } from './config.ts'
 import { renderScanResult, shortenPath } from '../core/render.ts'
 import type { ScanCommandResult, ScanEntry, ScanTotals } from '../core/result.ts'
 
@@ -70,10 +71,13 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
     nested: false,
   }))
 
+  // "self" is a scan-level guard (protect the cwd subtree), not a glob — the walker
+  // must never see it as a bare-name exclude (it would hide dirs literally named self).
+  const walkExcludes = request.excludes?.filter((item) => item !== SELF_TOKEN)
   const walk = await scanForNodeModules(walkRoots, {
     maxDepth: request.maxDepth,
     recursive: request.recursive,
-    excludes: request.excludes,
+    excludes: walkExcludes,
   })
   const permIssues = [...walk.permissionIssues]
   collected.push(...walk.entries)
@@ -84,7 +88,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
       const inner = await scanForNodeModules([direct], {
         maxDepth: request.maxDepth,
         recursive: true,
-        excludes: request.excludes,
+        excludes: walkExcludes,
         initialOwner: direct,
       })
       permIssues.push(...inner.permissionIssues)
@@ -179,11 +183,17 @@ async function applyFilters(entries: ScanEntry[], request: ScanRequest): Promise
   const excludeMatcher =
     request.excludes !== undefined && request.excludes.length > 0 ? makeGlobMatcher(request.excludes) : null
 
-  if (!wantsPm && !keepMatcher && !excludeMatcher) return entries
+  // v0.9 "self": entries inside (or exactly at) the cwd subtree are dropped from scan
+  // and delete flows alike — running nmh from a project protects that project wholesale.
+  const selfGuard = (request.excludes?.includes(SELF_TOKEN) ?? false) || (request.keep?.includes(SELF_TOKEN) ?? false)
+  const guardRoot = selfGuard ? path.resolve(request.cwd) : null
+
+  if (!wantsPm && !keepMatcher && !excludeMatcher && !selfGuard) return entries
 
   const survivingTops = new Set<string>()
   for (const entry of entries) {
     if (entry.nested) continue
+    if (guardRoot !== null && insideRoot(entry.path, guardRoot)) continue
     if (wantsPm && !matchPm(entry)) continue
     if (excludeMatcher && excludeMatcher(entry.path)) continue
     if (keepMatcher) {
