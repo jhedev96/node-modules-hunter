@@ -13,6 +13,7 @@ import { runSearch } from './commands/search.ts'
 import { runWhy } from './commands/why.ts'
 import { checkForUpdate } from './utils/update-check.ts'
 import { runMap } from './commands/map.ts'
+import { runTreemap } from './commands/treemap.ts'
 import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
@@ -61,6 +62,8 @@ cli.option('--licenses', 'stats only: bucket installed instances by their licens
 cli.option('--score', 'stats only: experimental composite bloat score 0-100 (waste % + dup factor + dead % + size)')
 cli.option('--co2', 'stats only: experimental carbon estimate (storage-year + one redownload)')
 cli.option('--online', 'stats only: deprecated scan — offline manifest data + lazy cached registry fallback for missing notes')
+cli.option('--treemap [file]', 'treemap export: single-file HTML (vanilla JS, no deps); default nmh-treemap.html in cwd')
+cli.option('--out <file>', 'treemap only: where to write the HTML file (same as --treemap <file>)')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
@@ -359,6 +362,38 @@ async function main(): Promise<number> {
   }
   if (flags.why !== undefined) {
     errorLog('--why needs a package name — nmh why <pkg> [dirs]')
+    return 1
+  }
+
+  // treemap (PRD §8.6 #1): `nmh treemap [dirs]` or `--treemap [file]` — single-file HTML export.
+  // The flag value doubles as the output file; --out overrides it. Read-only otherwise.
+  const treemapGiven = subcommand === 'treemap' || (flags.treemap !== undefined && flags.treemap !== false)
+  if (treemapGiven) {
+    if (deleted.given || subcommand === 'clean') {
+      errorLog('--treemap is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    const flagFile = typeof flags.treemap === 'string' ? flags.treemap : null
+    const outFlag = typeof flags.out === 'string' && flags.out.length > 0 ? flags.out : null
+    if (outFlag === null && flags.out !== undefined) {
+      errorLog('--out needs a file path — nmh treemap --out report.html')
+      return 1
+    }
+    const treemapTargets = subcommand === 'treemap' ? [...rest, ...dirTargets] : targets
+    return runTreemap({
+      targets: treemapTargets,
+      cwd,
+      maxDepth: effectiveDepth,
+      recursive,
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      pmFilter: pm.family !== null ? [pm.family] : undefined,
+      out: outFlag ?? flagFile ?? 'nmh-treemap.html',
+      json,
+    })
+  }
+  if (flags.out !== undefined) {
+    errorLog('--out only works with the treemap command — nmh treemap --out file.html')
     return 1
   }
 
