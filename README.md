@@ -35,8 +35,12 @@ nmh search <pattern> [dir…]        # find installed packages by name (+ versio
 nmh map [dir]                      # project → PM → size → top packages → declared deps
 nmh stats [dir]                    # size analytics: dup factor, waste size, top-N, per-package tree
 nmh stats --by type [dir]          # breakdown per dependency field (dep/dev/optional/peer/transitive)
+nmh stats --licenses [dir]         # license buckets (+⚠ copyleft inside production deps)
+nmh stats --score / --co2          # experimental: composite bloat score 0-100 / rough CO2 estimate
+nmh stats --online [dir]           # deprecated scan: offline manifests + lazy cached registry fallback
 nmh stats -g                       # global installs across npm/pnpm/yarn/bun — read-only analysis
 nmh why <pkg> [dir…]               # reverse depend: where is <pkg> and what requires it — read-only
+nmh treemap [dir]                  # single-file interactive HTML treemap → nmh-treemap.html
 
 nmh --dir=A,B,glob/*/node_modules  # targets: comma list, globs, ~ — combine with flags below
 nmh version | --version | -v
@@ -63,12 +67,14 @@ Search patterns: plain text is a case-insensitive substring (`nmh search lodash`
 | `-m, --map [--tree]` | Project map table; `--tree` lists package names per project |
 | `--depend [pkg]` | With `map`: show declared deps per project; with a value, list which projects declare it |
 | `--stats` | Size analytics: instances vs unique names, duplication factor, dedupable waste, top-N list |
-| `--tree` / `--top <n>` / `--by size\|type` | With `stats`: per-package size tree / row count (default 10) / breakdown mode — `type` buckets every instance by its declaring dep field (dependencies/dev/optional/peer + transitive) |
+| `--tree` / `--top <n>` / `--by size\|type\|licenses` | With `stats`: per-package size tree / row count (default 10) / breakdown mode — package sizes, the declaring dep-field breakdown (`type`), or license buckets (`licenses`: historical field shapes normalized, `unknown` last, ⚠ copyleft in production deps) |
 | `-g, --global` | With `stats`: analyze the global installs of npm/pnpm/yarn/bun (per-PM prefix scan, cross-PM duplicates, dead bin symlinks — read-only) |
 | `--save-baseline <name>` / `--compare <name>` / `--history` | With `stats`: snapshot totals+per-package to `~/.nmh/baselines/<name>.json`, diff a later run against it (totals, per-node_modules tree, package movers, >30% growth warning), or just list snapshots |
 | `--why <pkg>` | Same as the `why` command, mixed into any read-only form |
 | `--phantom` / `--dead` | With `stats`: best-effort regex audit — imports declared nowhere / declared+installed packages nobody imports |
-| `--save-report <file>` / `--report <file>` | scan only: **also** write the printed report to a file — format picked by extension `.json` / `.md` / `.txt` |
+| `--score` / `--co2` / `--licenses` / `--online` | With `stats` (focused views): experimental bloat score 0–100 (waste % + dup factor + dead % + size, grade A–F) / rough CO2 estimate (g CO2e per GB-year + per redownload) / license buckets with copyleft flag / deprecated check (offline manifests + lazy cached registry fallback for missing notes) |
+| `--save-report <file>` / `--report <file>` | `scan`, `map`, `search`, `stats`: **also** write the printed report to a file — format picked by extension `.json` / `.md` / `.txt` (write failure = warning, exit unchanged) |
+| `--treemap [file]` / `--out <file>` | `nmh treemap <dirs>`: export one self-contained interactive HTML treemap (default `nmh-treemap.html`); `--json` prints the raw data instead |
 | `--animate` / `--no-animate` | Live size counter while measuring: auto = real TTY only, `--animate` forces it even when piped; always suppressed under `--json`; `.nmhrc animate:false` mutes it |
 | `--update-check` | Opt-in: peek npm for a newer release (non-blocking, 24 h cache, notice on stderr; also `updateCheck` in `.nmhrc`) |
 | `--config <file>` | Use this config file instead of the `.nmhrc` lookup (cwd → `$HOME`) |
@@ -213,6 +219,54 @@ $ nmh stats ./my-repo --update-check   # opt-in npm peek, 24 h cache
 ℹ update tersedia: 0.4.0 → 0.5.0 — npm i -g node-modules-hunter (…)
 ```
 
+### Vision & hygiene extras (v0.5)
+
+**License scan** — every installed instance gets bucketed by its manifest `license` field (all historical shapes normalized: string, `{type}`, `[{type}]`); the `unknown` bucket lands last, and copyleft families (GPL/AGPL/LGPL/MPL) get a ⚠ only when they ship inside production dependencies:
+
+```bash
+$ nmh stats ./my-repo --licenses          # (= --by licenses)
+━━━ LICENSES ━━━
+MIT                     : 8.1 MB · 42 pkg
+Apache-2.0              : 2.0 MB · 11 pkg
+GPL-3.0-or-later        : 401 B · 1 pkg  ⚠ copyleft di production dependencies
+unknown                 : 41 B · 1 pkg
+```
+
+**Bloat Score & CO2** (experimental per decision #6) — one offline number for "how bloated is this folder" (waste % dominates at 40 pt, dup factor 20, dead declarations 20, absolute size vs 512 MB 20; grades A–F at 20-point steps), plus a clearly-labeled rough carbon estimate (~2 g CO2e per GB idle-year stored, ~10 g per GB redownloaded; small sizes stay honest to the third decimal):
+
+```bash
+$ nmh stats ./my-repo --score --co2
+━━━ BLOAT SCORE ━━━ (experimental)
+ 20 / 100  grade B  [████░░░░░░░░░░░░░░░░]
+waste  0%  → 0 pt
+dup factor  1×  → 0 pt
+dead  50% (1 pkg)  → 20 pt
+size  3.5 MB  → 0 pt
+estimasi kasar, bukan audit karbon — simpan setahun: 0.030 g CO2e
+kalau men-download ulang semuanya sekali: 0.310 g CO2e
+```
+
+The score runs the deps audit implicitly for its deadness component (without printing it — add `--dead` for the actual list).
+
+**Deprecated packages** — `--online` scans the installed manifests **offline first** (npm writes the `deprecated` note into package.json at install time); instances without a local note get a lazy, cached registry lookup — capped at 25 lookups per run, cached 30 days under `~/.nmh/cache/registry-deprecated/`, `NMH_REGISTRY_URL` points elsewhere (mirror/test), and network failures stay silent:
+
+```bash
+$ nmh stats ./my-repo --online
+━━━ DEPRECATED ━━━
+1 instance deprecated:
+old-lodash@4.17.19  ./web/node_modules — This version has a prototype pollution bug — please upgrade to 4.17.20+
+```
+
+**`nmh treemap`** — one **self-contained interactive HTML** (vanilla JS, zero dependencies, no network): a squarified two-level map (node_modules → top packages) with hover tooltips for path+size; symlinked packages get dashed sliver cells so nothing silently disappears:
+
+```bash
+$ nmh treemap ./my-repo                    # → ./nmh-treemap.html
+$ nmh treemap ./my-repo --out viz.html     # custom path; nmh treemap . --json = raw data
+🗺️ treemap → /abs/nmh-treemap.html — buka di browser, hover cell buat detail
+```
+
+**`--save-report` everywhere** — the report export is no longer scan-only: `map`, `search`, and `stats` accept `--save-report`/`--report` with the exact scan semantics (the printed report, format by extension `.json`/`.md`/`.txt`, ANSI stripped for text, write failure = warning and the exit code never changes). `treemap` refuses it — its HTML file IS the report.
+
 ## Safety first (the whole point)
 
 - **Guards refuse to delete** (exit code `3`): the filesystem root, `$HOME` itself, anything not named exactly `node_modules`, and targets with unresolvable paths (symlink loops).
@@ -296,7 +350,7 @@ For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your 
 
 ## Roadmap
 
-v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 adds the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): true lockfile parsing (pnpm/yaml-grade graphs), health score, license scan, treemap export (v0.5).
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 added the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. v0.5 adds the **vision & hygiene extras: license scan (`--licenses`/`--by licenses` with the copyleft-in-prod ⚠), the experimental Bloat Score (`--score`) and CO2 estimate (`--co2`), the deprecated check (`--online`, offline manifests + lazy cached registry fallback), the `nmh treemap` single-file HTML export and `--save-report` for map/search/stats**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): true lockfile parsing (pnpm/yaml-grade graphs), npm publish & docs polish (v1.0).
 
 ## Development
 

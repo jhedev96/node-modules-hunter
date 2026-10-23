@@ -46,7 +46,7 @@ cli.option('--tree', "map/stats only: list per-project packages (tree view, with
 cli.option('--depend [pkg]', "map only: show declared deps; with a value, list who declares it")
 cli.option('--stats', 'Stats report: overview + dup factor + waste + top sizes — read-only')
 cli.option('--top <n>', 'stats only: rows in the focused size list (default 10)')
-cli.option('--by <mode>', "stats only: breakdown mode — size (alias: package); 'type' lands in v0.4")
+cli.option('--by <mode>', "stats only: breakdown mode — 'size' (alias: package), 'type', 'licenses'")
 cli.option('--config <file>', 'Use this config file instead of the .nmhrc lookup (cwd → home)')
 cli.option('-g, --global', 'stats only: analyze global installs (per-PM prefix scan; read-only)')
 cli.option('--animate/--no-animate', 'Live size counter while measuring: --animate forces it on even when piped; --no-animate mutes it (auto = TTY only)')
