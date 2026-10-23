@@ -191,6 +191,14 @@ async function main(): Promise<number> {
       errorLog(`invalid --size: ${flags.size} (expected 'total' or 'each')`)
       return 1
     }
+  } else if (flags.size === true) {
+    // v0.9.2: a value-less --size used to fall through silently (rc 0, default mode) —
+    // every sibling guard (--pm/--depth/--delete) refuses loud
+    errorLog("--size needs a value — use --size=total or --size=each (a bare --size doesn't select a mode)")
+    return 1
+  } else if (Array.isArray(flags.size)) {
+    errorLog('--size given more than once — pass a single value (total | each)')
+    return 1
   }
 
   const deleted = normalizeDelete(flags.delete)
@@ -229,7 +237,10 @@ async function main(): Promise<number> {
   const expand = flags.expand === true
   const excludes = [...(config.exclude ?? []), ...splitTargets(flags.exclude as string | string[] | undefined)]
   const keep = [...(config.keep ?? []), ...splitTargets(flags.keep as string | string[] | undefined)]
-  const effectiveDepth = depth ?? config.depth ?? undefined
+  // 'invalid' is unreachable here for scan/delete flows (returned 1 above); the config family
+  // passes the raw flags.depth through untouched (line below the config dispatch), and this
+  // value is never read by config — so collapse the sentinel instead of shipping the union type
+  const effectiveDepth: number | undefined = typeof depth === 'number' ? depth : (config.depth ?? undefined)
   const globalGiven = flags.global === true
 
   // --save-report / --report (PRD §5.4): scan rides along and writes a file copy; --report is the alias

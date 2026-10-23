@@ -86,6 +86,28 @@ describe('nmh config — info (read-only)', () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   })
+
+  it('--json -q still delivers the payload — config output is never muted by --quiet (v0.9.2)', async () => {
+    const root = await tmpRoot('cfg-quiet')
+    try {
+      const rc = path.join(root, 'mine.nmhrc')
+      await fs.writeFile(rc, JSON.stringify({ depth: 2 }))
+      // read side: info
+      const read = await runCli(['config', 'info', '--config', rc, '--json', '-q'], { cwd: root, home: root })
+      expect(read.code).toBe(0)
+      const readPayload = JSON.parse(read.stdout) as ConfigPayload
+      expect(readPayload.command).toBe('config')
+      expect(readPayload.values).toEqual({ depth: 2 })
+      // write side: set
+      const write = await runCli(['config', 'set', '--config', rc, '--default-mode', 'trash', '--json', '-q'], { cwd: root, home: root })
+      expect(write.code).toBe(0)
+      const writePayload = JSON.parse(write.stdout) as ConfigPayload
+      expect(writePayload.op).toBe('set')
+      expect(writePayload.applied).toEqual({ defaultMode: 'trash' })
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('nmh config — set / add / remove / unset (write flows)', () => {

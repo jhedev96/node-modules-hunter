@@ -80,6 +80,29 @@ describe('scan e2e (spawned CLI, non-TTY)', () => {
     }
   })
 
+  it('bare --size is a loud usage error — silent default mode dropped (v0.9.2)', async () => {
+    const fx = await monorepoFixture('e2e-size-bare')
+    try {
+      const run = await runCli(['scan', fx.root, '--size'])
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain("--size needs a value — use --size=total or --size=each")
+      expect(run.stderr).toContain("doesn't select a mode")
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('--size given twice refuses with a single-value hint', async () => {
+    const fx = await monorepoFixture('e2e-size-twice')
+    try {
+      const run = await runCli(['scan', fx.root, '--size', 'each', '--size', 'total'])
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain('--size given more than once')
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
   it('quiet & json interplay: -q --json still delivers the payload; -q alone stays silent (v0.9 audit)', async () => {
     const fx = await monorepoFixture('e2e-quiet')
     try {

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { ConfigError, loadConfig, type NmhConfig } from '../utils/config.ts'
-import { errorLog, log, colors } from '../utils/logger.ts'
+import { errorLog, log, payload, colors } from '../utils/logger.ts'
 import { expandTilde } from '../utils/paths.ts'
 
 export type ConfigOp = 'info' | 'set' | 'add' | 'remove' | 'unset'
@@ -303,7 +303,8 @@ export async function runConfigCommand(request: ConfigCommandRequest): Promise<n
       }
       const loaded = await loadConfig(request.explicitFile ?? null, request.cwd)
       if (request.json === true) {
-        log(
+        // payload, not log — `--json` must survive `--quiet` (v0.9.2: the config family was muted)
+        payload(
           JSON.stringify({
             nmh: 'node-modules-hunter',
             command: 'config',
@@ -322,7 +323,8 @@ export async function runConfigCommand(request: ConfigCommandRequest): Promise<n
     const applied = await writeConfigMutation(file, mutation)
 
     if (request.json === true) {
-      log(
+      // payload, not log — `--json` must survive `--quiet` (v0.9.2: the config family was muted)
+      payload(
         JSON.stringify({
           nmh: 'node-modules-hunter',
           command: 'config',

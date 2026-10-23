@@ -147,4 +147,17 @@ describe('delete flow e2e (spawned CLI, non-TTY)', () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   })
+
+  it('--json without --yes refuses the delete — gate no longer trusts the TTY (v0.9.2)', async () => {
+    const fx = await monorepoFixture('json-noyes')
+    try {
+      const run = await runCli(['--dir', fx.paths.apiEntry, '--json', '--delete=hard'])
+      expect(run.code).toBe(1)
+      // wording is TTY-blind now: --json has no interactive prompt slot on either branch
+      expect(run.stderr).toContain('--json deletes require an explicit --yes')
+      expect(await exists(fx.paths.apiEntry)).toBe(true)
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
 })

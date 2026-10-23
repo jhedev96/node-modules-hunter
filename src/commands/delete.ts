@@ -137,8 +137,10 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
     return 0
   }
 
-  if (request.json && !request.assumeYes && !isTTYOut()) {
-    warn('non-interactive shell — deleting requires --yes (or --force); nothing was deleted')
+  if (request.json && !request.assumeYes) {
+    // v0.9.2: TTY no longer exempts --json — machine output has no interactive prompt slot,
+    // so a TTY --json run used to hard-delete with zero confirmation. --yes is the only door.
+    warn('--json deletes require an explicit --yes (or --force) — there is no interactive confirm inside --json; nothing was deleted')
     return 1
   }
 
