@@ -5,7 +5,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { expandTilde } from '../utils/paths.ts'
 import { createLimiter } from '../utils/limit.ts'
-import { progressLine, clearProgress, warn, verboseLog, log } from '../utils/logger.ts'
+import { progressLine, clearProgress, warn, verboseLog, log, payload } from '../utils/logger.ts'
 import { readPackageJson, listTopLevelPackages, packageVersion } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderGlobalJson, renderGlobalReport } from '../core/render.ts'
@@ -223,12 +223,12 @@ function finish(request: GlobalRequest, outcome: GlobalOutcome): number {
   if (outcome.reports.length === 0) {
     warn('no global install roots found — nothing to analyze here 🌐🙃')
     if (request.json) {
-      log(renderGlobalJson(outcome, request))
+      payload(renderGlobalJson(outcome, request))
       return 2
     }
     return 2
   }
-  if (request.json) log(renderGlobalJson(outcome, request))
+  if (request.json) payload(renderGlobalJson(outcome, request))
   else log(renderGlobalReport(outcome, request))
   return outcome.code
 }

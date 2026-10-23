@@ -1,6 +1,6 @@
 import path, { basename } from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { formatBytes, stripAnsi } from '../utils/format.ts'
 import { saveReportFile } from '../utils/report.ts'
 import { resolveRoots } from '../utils/paths.ts'
@@ -229,12 +229,13 @@ export async function runScan(request: ScanRequest): Promise<ScanOutcome> {
 
   if (result.entries.length === 0) {
     if (!request.json) warn('no node_modules found — nothing to hunt here 🙃')
-    else log(renderedScan(result, request, true))
+    else payload(renderedScan(result, request, true))
     await writeReport(request, result)
     return outcome
   }
 
-  log(renderedScan(result, request, request.json === true))
+  if (request.json === true) payload(renderedScan(result, request, true))
+  else log(renderedScan(result, request, false))
   await writeReport(request, result)
   return outcome
 }

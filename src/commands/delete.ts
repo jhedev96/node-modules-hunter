@@ -4,7 +4,7 @@ import { deleteEntries } from '../core/deleter.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
 import { renderDeleteJson, renderDeleteSummary, renderPlan, shortenPath } from '../core/render.ts'
 import { writeDeleteLog } from '../utils/delete-log.ts'
-import { clearProgress, errorLog, isSilent, isTTYOut, log, progressLine, warn } from '../utils/logger.ts'
+import { clearProgress, errorLog, isSilent, isTTYOut, log, progressLine, warn, payload } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { DeleteMode, DeleteOutcome, DeleteOutcomeRow, ScanEntry } from '../core/result.ts'
@@ -55,7 +55,7 @@ export async function executeAll(
   })
   clearProgress()
 
-  if (request.json) log(renderDeleteJson(outcome, request.mode, false))
+  if (request.json) payload(renderDeleteJson(outcome, request.mode, false))
   else {
     const summary = renderDeleteSummary(outcome, request.mode)
     if (summary) log(summary)
@@ -132,7 +132,7 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
   const totalSize = safeEntries.reduce((sum, entry) => sum + entry.size, 0)
 
   if (request.dryRun) {
-    if (request.json) log(planJson(safeEntries, mode, true))
+    if (request.json) payload(planJson(safeEntries, mode, true))
     else log(renderPlan(safeEntries, mode))
     return 0
   }

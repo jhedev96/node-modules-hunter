@@ -1,4 +1,4 @@
-import { log, warn, verboseLog } from '../utils/logger.ts'
+import { log, warn, verboseLog, payload } from '../utils/logger.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, createDepClassifier, ownManifestRequires, packageVersion } from '../core/packages.ts'
@@ -108,14 +108,14 @@ export async function runWhy(request: WhyRequest): Promise<number> {
 
   if (code === 2) {
     if (request.json) {
-      log(renderWhyJson({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, request))
+      payload(renderWhyJson({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, request))
       return 2
     }
     warn(`no instance of '${request.pkg}' in the scanned node_modules — nmh why <pkg> [dirs]`)
     return 2
   }
 
-  if (request.json) log(renderWhyJson({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, request))
+  if (request.json) payload(renderWhyJson({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, request))
   else log(renderWhyReport({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, { cwd: request.cwd, expand: request.expand === true }))
   return code
 }

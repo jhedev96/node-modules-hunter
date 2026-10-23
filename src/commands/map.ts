@@ -1,5 +1,5 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
@@ -113,7 +113,7 @@ export async function runMap(request: MapRequest): Promise<number> {
 
   if (request.json) {
     const printed = renderMapJson({ ...outcome, projects }, request)
-    log(printed)
+    payload(printed)
     await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.projects.length === 0 || projects.length === 0 ? 2 : outcome.code
   }

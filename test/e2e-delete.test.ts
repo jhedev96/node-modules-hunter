@@ -127,4 +127,24 @@ describe('delete flow e2e (spawned CLI, non-TTY)', () => {
       await fs.rm(empty, { recursive: true, force: true })
     }
   })
+
+  it('victims directly inside $HOME refuse to delete (v0.9 guard hardening)', async () => {
+    const root = await tmpRoot('guard-home')
+    try {
+      await fs.mkdir(path.join(root, 'node_modules', 'guineapig'), { recursive: true })
+      await fs.writeFile(path.join(root, 'node_modules', 'guineapig', 'package.json'), '{"name":"guineapig","version":"1.0.0"}')
+      // walk-discovered victim (target = home root itself)
+      const walked = await runCli(['--dir', '.', '--delete=hard', '-y'], { cwd: root, home: root })
+      expect(walked.code, walked.stderr).toBe(3)
+      expect(walked.stderr).toContain('refusing: node_modules directly inside the home directory')
+      expect(await exists(path.join(root, 'node_modules'))).toBe(true)
+      // direct target pinned onto the very same victim
+      const direct = await runCli(['--dir', 'node_modules', '--delete=hard', '-y'], { cwd: root, home: root })
+      expect(direct.code, direct.stderr).toBe(3)
+      expect(direct.stderr).toContain('refusing')
+      expect(await exists(path.join(root, 'node_modules'))).toBe(true)
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
 })

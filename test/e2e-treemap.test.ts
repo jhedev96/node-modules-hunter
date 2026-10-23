@@ -193,4 +193,18 @@ describe('treemap e2e (nmh treemap)', () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   })
+
+  it('unwritable --out stays exit 1 with a friendly 🛑 (no raw errno crash)', async () => {
+    const root = await fixture('tree-eacces')
+    try {
+      // a FILE occupying the parent spot makes mkdir/write fail on every platform (even as root)
+      await fs.writeFile(path.join(root, 'blocker'), 'not a directory')
+      const run = await runCli(['treemap', '.', '--out', 'blocker/viz.html'], { cwd: root, home: root })
+      expect(run.code).toBe(1)
+      expect(run.stderr).toContain('could not write the treemap file')
+      expect(run.stderr).toContain('blocker')
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
 })

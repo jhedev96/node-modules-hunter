@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { makeSearchMatcher } from '../utils/match.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion } from '../core/packages.ts'
@@ -95,7 +95,7 @@ export async function runSearch(request: SearchRequest): Promise<number> {
 
   if (request.json) {
     const printed = renderSearchJson(outcome, request)
-    log(printed)
+    payload(printed)
     await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.code
   }

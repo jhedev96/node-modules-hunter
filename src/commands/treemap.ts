@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { collectMap } from './map.ts'
-import { log, warn, verboseLog } from '../utils/logger.ts'
+import { log, warn, verboseLog, errorLog, payload } from '../utils/logger.ts'
 import { renderTreemapHtml, type TreemapData } from '../core/treemap.ts'
 
 export interface TreemapRequest {
@@ -50,7 +50,7 @@ export async function runTreemap(request: TreemapRequest): Promise<number> {
   }
 
   if (request.json) {
-    log(JSON.stringify(data))
+    payload(JSON.stringify(data))
     return entries.length === 0 ? 2 : 0
   }
 
@@ -60,8 +60,13 @@ export async function runTreemap(request: TreemapRequest): Promise<number> {
   }
 
   const outPath = path.resolve(request.cwd, request.out)
-  await fs.mkdir(path.dirname(outPath), { recursive: true })
-  await fs.writeFile(outPath, renderTreemapHtml(data), 'utf8')
+  try {
+    await fs.mkdir(path.dirname(outPath), { recursive: true })
+    await fs.writeFile(outPath, renderTreemapHtml(data), 'utf8')
+  } catch (err) {
+    errorLog(`🛑 could not write the treemap file → ${outPath} — ${err instanceof Error ? err.message : String(err)}`)
+    return 1
+  }
   verboseLog(`treemap data: ${entries.length} entries, ${entries.reduce((sum, entry) => sum + entry.packages.length, 0)} packages`)
   log(`🗺️ treemap → ${outPath} — buka di browser, hover cell buat detail`)
   return 0

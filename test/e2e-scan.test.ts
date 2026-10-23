@@ -79,4 +79,25 @@ describe('scan e2e (spawned CLI, non-TTY)', () => {
       await fs.rm(fx.root, { recursive: true, force: true })
     }
   })
+
+  it('quiet & json interplay: -q --json still delivers the payload; -q alone stays silent (v0.9 audit)', async () => {
+    const fx = await monorepoFixture('e2e-quiet')
+    try {
+      const payloadRun = await runCli(['scan', fx.root, '--json', '-q'])
+      expect(payloadRun.code).toBe(0)
+      const parsed = JSON.parse(payloadRun.stdout) as { totals: { folders: number } }
+      expect(parsed.totals.folders).toBeGreaterThan(0)
+
+      const silentRun = await runCli(['scan', fx.root, '-q'])
+      expect(silentRun.code).toBe(0)
+      expect(silentRun.stdout).toBe('')
+
+      const statsRun = await runCli(['stats', fx.root, '--json', '-q'])
+      expect(statsRun.code).toBe(0)
+      const statsPayload = JSON.parse(statsRun.stdout) as { command: string }
+      expect(statsPayload.command).toBe('stats')
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
 })

@@ -149,10 +149,11 @@ describe('map e2e (spawned CLI, non-TTY)', () => {
     try {
       const treeAlone = await runCli(['scan', fx.root, '--tree'])
       expect(treeAlone.code).toBe(1)
-      expect(treeAlone.stderr).toContain('--tree/--depend only work with the map or stats command')
+      expect(treeAlone.stderr).toContain('--tree works with map or stats, --depend is map-only')
 
       const dependAlone = await runCli(['--depend', 'react', fx.root])
       expect(dependAlone.code).toBe(1)
+      expect(dependAlone.stderr).toContain('--depend only works with the map command')
 
       const mapDelete = await runCli(['map', fx.root, '--delete=hard', '-y'])
       expect(mapDelete.code).toBe(1)

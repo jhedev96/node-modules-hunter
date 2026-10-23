@@ -28,6 +28,12 @@ export async function checkDeleteTarget(candidate: string): Promise<GuardVerdict
   }
   if (isRootPath(real)) return verdict('root', 'refusing: target is a filesystem root')
   if (real === os.homedir()) return verdict('home', 'refusing: target is the user home directory')
+  // v0.9 audit hardening: a node_modules SITTING DIRECTLY inside / or $HOME is
+  // structural damage territory (think `home/node_modules` drifting packages) — same risk
+  // class as deleting $HOME itself, so it refuses as well.
+  const parent = path.dirname(real)
+  if (isRootPath(parent)) return verdict('root', 'refusing: node_modules directly inside the filesystem root')
+  if (parent === os.homedir()) return verdict('home', 'refusing: node_modules directly inside the home directory')
 
   return { safe: true }
 }

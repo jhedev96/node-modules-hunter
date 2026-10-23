@@ -88,6 +88,12 @@ export function log(message: string): void {
   if (!state.quiet) console.log(message)
 }
 
+/** Machine payload to stdout — --quiet never mutes it: scripts that asked for
+ *  --json depend on receiving the data even in minimal-output mode (v0.9 audit fix). */
+export function payload(message: string): void {
+  console.log(message)
+}
+
 /** Warning to stderr (keeps stdout clean for JSON/table). */
 export function warn(message: string): void {
   if (!state.quiet) console.error(colors.yellow(`⚠ ${message}`))

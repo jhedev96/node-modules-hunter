@@ -9,7 +9,7 @@ import { runStats } from './stats.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
 import { scanForNodeModules } from '../core/walker.ts'
 import { renderScanResult } from '../core/render.ts'
-import { errorLog, log, warn, colors, isTTYOut } from '../utils/logger.ts'
+import { errorLog, log, warn, colors, isTTYOut, payload } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { renderFullBanner, renderCompactBanner } from '../utils/banner.ts'
 import type { DeleteMode, ScanEntry } from '../core/result.ts'
@@ -36,6 +36,10 @@ export interface WizardOptions {
   json?: boolean
   /** Backs the ⚙️ settings menu (v0.7, PRD §7.5 step 3). */
   settings?: WizardSettings
+  /** Merged excludes (config + flag): honored by the fallback scan and all menu rescans (v0.9 audit fix). */
+  excludes?: string[]
+  /** Merged keep list — same plumbing as excludes; `self` stays a scan-level guard here too. */
+  keep?: string[]
 }
 
 /** Wizard quick-scan depth (PRD §7.5 step 2). The menu never supplies --depth; keep one source of truth. */
@@ -112,9 +116,16 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
   if (!options.json && scope.climbed) {
     warn(`no node_modules within 3 levels of cwd — scoped to the project root above: ${scope.root}`)
   }
-  const outcome = await collectScan({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
+  const outcome = await collectScan({
+    targets: ['.'],
+    cwd: scope.root,
+    maxDepth: WIZARD_DEPTH,
+    excludes: options.excludes,
+    keep: options.keep,
+  })
   if (outcome.result.entries.length > 0 || options.json) {
-    log(renderScanResult(outcome.result, { cwd: scope.root, json: options.json === true, sizeMode: 'each' }))
+    if (options.json) payload(renderScanResult(outcome.result, { cwd: scope.root, json: true, sizeMode: 'each' }))
+    else log(renderScanResult(outcome.result, { cwd: scope.root, json: false, sizeMode: 'each' }))
   } else {
     warn('no node_modules found in this folder')
     if (!options.json && scope.scouted) {
@@ -138,7 +149,13 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
   }
 
   for (;;) {
-    const scan = await collectScan({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
+    const scan = await collectScan({
+      targets: ['.'],
+      cwd: scope.root,
+      maxDepth: WIZARD_DEPTH,
+      excludes: options.excludes,
+      keep: options.keep,
+    })
     const entries = scan.result.entries
     if (entries.length === 0) {
       outro('nothing found 🙃')

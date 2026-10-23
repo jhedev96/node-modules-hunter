@@ -1,5 +1,5 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog, payload } from '../utils/logger.ts'
 import { writeReportSnapshot } from '../utils/report.ts'
 import { stripAnsi, formatBytes } from '../utils/format.ts'
 import {
@@ -545,7 +545,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
   if (request.history === true) {
     const items = await listBaselines()
     if (request.json) {
-      log(JSON.stringify({ nmh: toolVersion(), command: 'stats', mode: 'baseline-history', baselines: items }, null, 2))
+      payload(JSON.stringify({ nmh: toolVersion(), command: 'stats', mode: 'baseline-history', baselines: items }, null, 2))
       return 0
     }
     log(renderBaselineHistory(items, request.cwd))
@@ -593,7 +593,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
     }
     if (request.json) {
       const baselineExtra = { saved: savedFile !== null ? { name: request.saveBaseline!, createdAt: fresh.createdAt, file: savedFile } : undefined, compare: null }
-      log(renderStatsJson(outcome, request, { baseline: baselineExtra }))
+      payload(renderStatsJson(outcome, request, { baseline: baselineExtra }))
       return 2
     }
     warn('no node_modules found — nothing to analyze here 🙃')
@@ -615,7 +615,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
       compare: comparison,
     }
     const printed = renderStatsJson(outcome, request, { baseline: baselineExtra })
-    log(printed)
+    payload(printed)
     await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.code
   }

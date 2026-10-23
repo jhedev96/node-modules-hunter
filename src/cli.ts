@@ -32,7 +32,7 @@ cli.option('-y, --yes', 'Answer yes to every prompt')
 cli.option('-f, --force', 'Skip all confirmations (implies --yes)')
 cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N lands later")
 cli.option('--json', 'Machine-readable JSON output')
-cli.option('-q, --quiet', 'Minimal output')
+cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
 cli.option('--no-color', 'Disable ANSI colors')
 cli.option('-r, --recursive', 'Also look INSIDE found node_modules (nested audit; totals stay top-level only)')
@@ -215,7 +215,12 @@ async function main(): Promise<number> {
     // in the config family a bare `--depth` is a KEY to unset, not a scan cap —
     // the numeric validation belongs to scan/delete flows only
     if (positionals[0] !== 'config') {
-      errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
+      // cac swallows `--depth -2` (the bare flag loses its value) — say so instead of printing `true`
+      if (flags.depth === true) {
+        errorLog('--depth needs a non-negative integer — use --depth=<n> (e.g. --depth=2)')
+      } else {
+        errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
+      }
       return 1
     }
   }
@@ -493,11 +498,15 @@ async function main(): Promise<number> {
   }
 
   if ((treeGiven || dependGiven) && !mapGiven && !statsGiven) {
-    errorLog('--tree/--depend only work with the map or stats command')
+    if (dependGiven && !treeGiven) {
+      errorLog('--depend only works with the map command — nmh map <dirs> --depend [pkg]')
+    } else {
+      errorLog('--tree works with map or stats, --depend is map-only — nmh map <dirs> --depend [pkg]')
+    }
     return 1
   }
   if (dependGiven && !mapGiven) {
-    errorLog('--depend only works with the map command (the stats view lands in v0.4)')
+    errorLog('--depend only works with the map command — nmh map <dirs> --depend [pkg]')
     return 1
   }
   if (mapGiven) {
@@ -644,6 +653,8 @@ async function main(): Promise<number> {
     defaultMode: config.defaultMode,
     json,
     settings: { source: configSource, values: config },
+    excludes: excludes.length > 0 ? excludes : undefined,
+    keep: keep.length > 0 ? keep : undefined,
   })
 }
 
