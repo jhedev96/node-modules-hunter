@@ -261,7 +261,10 @@ export function parseYarnLock(text: string): { edges: LockEdge[]; rootDirect: nu
 }
 
 /** Subset shape for the mini-YAML: only scalar strings and one-level mappings. */
-export type MiniYamlValue = string | Record<string, MiniYamlValue>
+export interface MiniYamlMap {
+  [key: string]: MiniYamlValue
+}
+export type MiniYamlValue = string | MiniYamlMap
 
 /**
  * Lockfile-subset mini-YAML (pnpm-lock.yaml is machine-made and regular):
