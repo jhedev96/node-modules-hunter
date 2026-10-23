@@ -2,7 +2,7 @@ import { cac } from 'cac'
 import path from 'node:path'
 import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
 import { splitTargets } from './utils/paths.ts'
-import { toolVersion } from './utils/version.ts'
+import { versionDetail, renderVersionDetail } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { loadConfig, ConfigError } from './utils/config.ts'
 import { setLogDirectory } from './utils/delete-log.ts'
@@ -112,7 +112,7 @@ async function main(): Promise<number> {
 
   // run:false → built-ins handled manually for deterministic exit codes
   if (flags.version === true) {
-    console.log(`${toolVersion()} (node ${process.version}, ${process.platform})`)
+    printVersion(flags.json === true)
     return 0
   }
   if (flags.help === true || positionals[0] === 'help') {
@@ -127,9 +127,11 @@ async function main(): Promise<number> {
     return 1
   }
   let config: Partial<NmhConfig> = {}
+  let configSource: string | null = null
   try {
     const loaded = await loadConfig(explicitConfig, process.cwd())
     config = loaded.values
+    configSource = loaded.source
     if (loaded.source !== null) verboseLog(`config: ${loaded.source}`)
   } catch (err) {
     if (err instanceof ConfigError) {
@@ -290,7 +292,7 @@ async function main(): Promise<number> {
   }
 
   if (subcommand === 'version') {
-    console.log(`${toolVersion()} (node ${process.version}, ${process.platform})`)
+    printVersion(json)
     return 0
   }
 
@@ -577,8 +579,24 @@ async function main(): Promise<number> {
     return outcome.code
   }
 
-  // totally bare: wizard (TTY) / read-only scan (non-TTY, never hangs)
-  return runWizard(cwd, { defaultMode: config.defaultMode })
+  // totally bare: wizard (TTY) / compact banner + read-only scan (non-TTY, never hangs)
+  return runWizard(cwd, {
+    defaultMode: config.defaultMode,
+    json,
+    settings: { source: configSource, values: config },
+  })
+}
+
+/**
+ * `nmh version` / `--version`: rich banner by default (v0.7 — runtime/system/io),
+ * `--json` prints the same payload machine-readable.
+ */
+function printVersion(json: boolean): void {
+  if (json) {
+    console.log(JSON.stringify(versionDetail(), null, 2))
+    return
+  }
+  console.log(renderVersionDetail(versionDetail()))
 }
 
 /**
