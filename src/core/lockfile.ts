@@ -162,9 +162,9 @@ export async function readNpmLockGraph(projectDir: string, file = 'package-lock.
   return buildGraph('npm', file, parsed)
 }
 
-/** First usable lockfile wins — npm, then yarn v1; pnpm/bun land in later slices. */
+/** First usable lockfile wins — npm, then yarn v1, then pnpm; bun lands later. */
 export async function readProjectLockGraph(projectDir: string): Promise<LockGraph | null> {
-  return (await readNpmLockGraph(projectDir)) ?? (await readYarnLockGraph(projectDir)) ?? null
+  return (await readNpmLockGraph(projectDir)) ?? (await readYarnLockGraph(projectDir)) ?? (await readPnpmLockGraph(projectDir)) ?? null
 }
 
 /**
@@ -258,4 +258,190 @@ export function parseYarnLock(text: string): { edges: LockEdge[]; rootDirect: nu
   }
   if (!sawEntry) return null
   return { edges, rootDirect: 0, nodeNames }
+}
+
+/** Subset shape for the mini-YAML: only scalar strings and one-level mappings. */
+export type MiniYamlValue = string | Record<string, MiniYamlValue>
+
+/**
+ * Lockfile-subset mini-YAML (pnpm-lock.yaml is machine-made and regular):
+ * indent-stack mappings, quoted/plain scalar values, one-level inline flow
+ * maps `{integrity: sha512-…}`. Sequences, anchors, multi-line scalars and
+ * nested flow structures are refused by CALLERS (required paths simply won't
+ * resolve → null, manifest-grade). NOT a general YAML parser — by design.
+ */
+export function parseMiniYaml(text: string): Record<string, MiniYamlValue> {
+  const root: Record<string, MiniYamlValue> = {}
+  const stack: Array<{ indent: number; obj: Record<string, MiniYamlValue> }> = [{ indent: -1, obj: root }]
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '')
+    const trimmed = line.trim()
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue
+    const indent = line.length - line.trimStart().length
+    if (trimmed.startsWith('- ')) continue // sequence line — not in the subset
+    const colon = topLevelColonIndex(trimmed)
+    if (colon < 0) continue
+    const key = unquote(trimmed.slice(0, colon).trim())
+    const valueText = trimmed.slice(colon + 1).trim()
+    while (stack.length > 1 && stack[stack.length - 1]!.indent >= indent) stack.pop()
+    const parent = stack[stack.length - 1]!.obj
+    if (valueText.length === 0) {
+      const child: Record<string, MiniYamlValue> = {}
+      parent[key] = child
+      stack.push({ indent, obj: child })
+    } else if (valueText.startsWith('{') && valueText.endsWith('}')) {
+      parent[key] = parseInlineFlow(valueText.slice(1, -1))
+    } else {
+      parent[key] = unquote(valueText)
+    }
+  }
+  return root
+}
+
+/** First ':' outside quotes/braces, or -1. */
+function topLevelColonIndex(text: string): number {
+  let quote: '"' | "'" | null = null
+  let braces = 0
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!
+    if (quote !== null) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") quote = ch
+    else if (ch === '{' || ch === '[') braces += 1
+    else if (ch === '}' || ch === ']') braces -= 1
+    else if (ch === ':' && braces === 0) return i
+  }
+  return -1
+}
+
+/** `{a: b, c: "d"}` → record (single level, no nested braces). */
+function parseInlineFlow(inner: string): Record<string, MiniYamlValue> {
+  const out: Record<string, MiniYamlValue> = {}
+  if (inner.trim().length === 0) return out
+  let quote: '"' | "'" | null = null
+  let start = 0
+  for (let i = 0; i <= inner.length; i += 1) {
+    const ch = inner[i] ?? ','
+    if (quote !== null) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === '"' || ch === "'") quote = ch
+    if (ch === ',' || i === inner.length) {
+      const part = inner.slice(start, i)
+      const colon = topLevelColonIndex(part)
+      if (colon > 0) out[unquote(part.slice(0, colon).trim())] = unquote(part.slice(colon + 1).trim())
+      start = i + 1
+    }
+  }
+  return out
+}
+
+/** Strip one pair of matching quotes (pnpm quotes keys with ':' inside). */
+function unquote(value: string): string {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1)
+  }
+  return value
+}
+
+/** 'lodash@4.17.21(@babel/core@7.26.0)' → 'lodash' — peer suffix stripped first. */
+function nameOfSpecKey(key: string): string | null {
+  const base = key.split('(')[0] ?? key
+  const at = base.lastIndexOf('@')
+  if (at <= 0) return null
+  const name = base.slice(0, at)
+  return name.length > 0 ? name : null
+}
+
+interface NameEdgeCount {
+  edges: LockEdge[]
+  rootDirect: number
+  nodeNames: Set<string>
+}
+
+/**
+ * pnpm-lock.yaml (v6/v9) PLUS the sibling package.json. Edges come from the
+ * `snapshots:` maps (lockfileVersion 9.0 — `packages:` holds resolution-only
+ * nodes) or the `packages:` deps maps (6.x). Root importer '.' supplies
+ * rootDirect + root edges via its specifier lines (specifier wins over the
+ * resolved version as the declared range). Workspace sub-importers are
+ * counted later — v0.6 keeps the root importer only, said in the docs.
+ */
+export async function readPnpmLockGraph(projectDir: string): Promise<LockGraph | null> {
+  let text: string
+  try {
+    const stat = await fs.stat(path.join(projectDir, 'pnpm-lock.yaml'))
+    if (!stat.isFile() || stat.size > MAX_LOCKFILE_BYTES) return null
+    text = await fs.readFile(path.join(projectDir, 'pnpm-lock.yaml'), 'utf8')
+  } catch {
+    return null
+  }
+  const doc = parseMiniYaml(text)
+  const parsed = parsePnpmDoc(doc)
+  if (parsed === null) return null
+  // NOTE (unlike yarn): pnpm lockfiles carry the root importer ('.') with
+  // specifier lines — the manifest is NOT re-read, keeping rootDirect single-sourced
+  return buildGraph('pnpm', 'pnpm-lock.yaml', parsed)
+}
+
+/** Pull the graph source data out of a parsed pnpm-lock.yaml document. */
+export function parsePnpmDoc(doc: Record<string, MiniYamlValue>): NameEdgeCount | null {
+  const edges: LockEdge[] = []
+  const nodeNames = new Set<string>()
+
+  // lockfileVersion 9.0: snapshots carry the inter-package edges
+  const snapshots = doc.snapshots
+  if (snapshots !== undefined && typeof snapshots === 'object' && !Array.isArray(snapshots)) {
+    collectPnpmNodes(snapshots as Record<string, MiniYamlValue>, edges, nodeNames)
+  }
+  const packages = doc.packages
+  if (packages !== undefined && typeof packages === 'object' && !Array.isArray(packages)) {
+    const hadSnapshots = nodeNames.size > 0
+    // when snapshots already supplied edges (9.0), packages: is resolution-only —
+    // still harvest names, but never collect duplicate dep edges
+    collectPnpmNodes(packages as Record<string, MiniYamlValue>, hadSnapshots ? [] : edges, nodeNames)
+  }
+  if (nodeNames.size === 0) return null // not a pnpm lockfile shape we know
+
+  // root importer '.' — specifier is the DECLARED range when present
+  let rootDirect = 0
+  const importers = doc.importers
+  if (importers !== undefined && typeof importers === 'object' && !Array.isArray(importers)) {
+    const rootImporter = (importers as Record<string, MiniYamlValue>)['.']
+    if (rootImporter !== undefined && typeof rootImporter === 'object' && !Array.isArray(rootImporter)) {
+      for (const field of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+        const map = (rootImporter as Record<string, MiniYamlValue>)[field]
+        if (map === undefined || typeof map !== 'object' || Array.isArray(map)) continue
+        for (const [name, entry] of Object.entries(map as Record<string, MiniYamlValue>)) {
+          const range = typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+            ? (entry as Record<string, MiniYamlValue>).specifier ?? (entry as Record<string, MiniYamlValue>).version
+            : entry
+          if (typeof range !== 'string') continue
+          edges.push({ from: ROOT, to: name, range })
+          rootDirect += 1
+        }
+      }
+    }
+  }
+  return { edges, rootDirect, nodeNames }
+}
+
+/** Collect node names + dependency edges from a packages/snapshots section. */
+function collectPnpmNodes(section: Record<string, MiniYamlValue>, edges: LockEdge[], nodeNames: Set<string>): void {
+  for (const [key, entry] of Object.entries(section)) {
+    const name = nameOfSpecKey(key)
+    if (name === null) continue
+    nodeNames.add(name)
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const deps = (entry as Record<string, MiniYamlValue>).dependencies
+    if (deps === undefined || typeof deps !== 'object' || Array.isArray(deps)) continue
+    for (const [to, range] of Object.entries(deps as Record<string, MiniYamlValue>)) {
+      // 6.x values are plain resolved versions; 9.0 may carry specifiers — either
+      // is an honest edge label; 'link:' aliases get their literal text
+      edges.push({ from: name, to: nameOfSpecKey(to) ?? to, range: typeof range === 'string' ? range : '' })
+    }
+  }
 }
