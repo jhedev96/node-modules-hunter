@@ -1,8 +1,10 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
+import { writeReportSnapshot } from '../utils/report.ts'
+import { stripAnsi } from '../utils/format.ts'
 import {
   renderMapDepend,
   renderMapDependReverse,
@@ -28,6 +30,8 @@ export interface MapRequest {
   keep?: string[]
   pmFilter?: string[]
   expand?: boolean
+  /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
+  saveReport?: string
 }
 
 /**
@@ -108,7 +112,9 @@ export async function runMap(request: MapRequest): Promise<number> {
   }
 
   if (request.json) {
-    log(renderMapJson({ ...outcome, projects }, request))
+    const printed = renderMapJson({ ...outcome, projects }, request)
+    log(printed)
+    await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.projects.length === 0 || projects.length === 0 ? 2 : outcome.code
   }
 
@@ -121,15 +127,18 @@ export async function runMap(request: MapRequest): Promise<number> {
     return 2
   }
 
+  let printed: string
   if (request.depend === true && request.dependPkg) {
-    log(renderMapDependReverse(projects, request.dependPkg, options))
+    printed = renderMapDependReverse(projects, request.dependPkg, options)
   } else if (request.depend === true) {
-    log(renderMapDepend(projects, options))
+    printed = renderMapDepend(projects, options)
   } else if (request.tree === true) {
-    log(renderMapTree(projects, options))
+    printed = renderMapTree(projects, options)
   } else {
-    log(renderMapTable(projects, options))
+    printed = renderMapTable(projects, options)
   }
+  log(printed)
+  await writeReportSnapshot(request.saveReport, stripAnsi(printed), { ok: note, fail: warn })
 
   return outcome.code
 }

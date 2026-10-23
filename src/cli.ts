@@ -327,6 +327,7 @@ async function main(): Promise<number> {
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       expand,
+      saveReport: reportPath ?? undefined,
     })
   }
 
@@ -371,6 +372,10 @@ async function main(): Promise<number> {
   if (treemapGiven) {
     if (deleted.given || subcommand === 'clean') {
       errorLog('--treemap is read-only — combine it with scan, not with delete/clean')
+      return 1
+    }
+    if (reportPath !== null) {
+      errorLog('--save-report does not work with treemap — the HTML file IS the report (nmh treemap --out <file>)')
       return 1
     }
     const flagFile = typeof flags.treemap === 'string' ? flags.treemap : null
@@ -450,6 +455,7 @@ async function main(): Promise<number> {
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       expand,
+      saveReport: reportPath ?? undefined,
     })
   }
 
@@ -505,6 +511,7 @@ async function main(): Promise<number> {
       score: flags.score === true,
       co2: flags.co2 === true,
       online: flags.online === true,
+      saveReport: reportPath ?? undefined,
     })
   }
   if (flags.top !== undefined || by !== null) {

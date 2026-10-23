@@ -1,11 +1,13 @@
 import path from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog } from '../utils/logger.ts'
+import { log, progressLine, clearProgress, warn, verboseLog, note } from '../utils/logger.ts'
 import { makeSearchMatcher } from '../utils/match.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderSearchJson, renderSearchResults } from '../core/render.ts'
+import { writeReportSnapshot } from '../utils/report.ts'
+import { stripAnsi } from '../utils/format.ts'
 import type { SearchOutcome } from '../core/result.ts'
 
 export interface SearchRequest {
@@ -21,6 +23,8 @@ export interface SearchRequest {
   keep?: string[]
   pmFilter?: string[]
   expand?: boolean
+  /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
+  saveReport?: string
 }
 
 /**
@@ -90,7 +94,9 @@ export async function runSearch(request: SearchRequest): Promise<number> {
   const outcome = await collectSearch(request)
 
   if (request.json) {
-    log(renderSearchJson(outcome, request))
+    const printed = renderSearchJson(outcome, request)
+    log(printed)
+    await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.code
   }
 
@@ -99,6 +105,8 @@ export async function runSearch(request: SearchRequest): Promise<number> {
     return outcome.code
   }
 
-  log(renderSearchResults(outcome, request))
+  const printed = renderSearchResults(outcome, request)
+  log(printed)
+  await writeReportSnapshot(request.saveReport, stripAnsi(printed), { ok: note, fail: warn })
   return outcome.code
 }

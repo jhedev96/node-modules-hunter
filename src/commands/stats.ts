@@ -1,5 +1,7 @@
 import { createLimiter } from '../utils/limit.ts'
 import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog } from '../utils/logger.ts'
+import { writeReportSnapshot } from '../utils/report.ts'
+import { stripAnsi } from '../utils/format.ts'
 import {
   snapshotFromStats,
   saveBaseline,
@@ -54,6 +56,8 @@ export interface StatsRequest {
   co2?: boolean
   /** --online: deprecated scan of installed manifests + lazy registry fallback for missing notes. */
   online?: boolean
+  /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
+  saveReport?: string
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
@@ -518,25 +522,29 @@ export async function runStats(request: StatsRequest): Promise<number> {
       saved: savedFile !== null ? { name: request.saveBaseline!, createdAt: fresh.createdAt, file: savedFile } : undefined,
       compare: comparison,
     }
-    log(renderStatsJson(outcome, request, { baseline: baselineExtra }))
+    const printed = renderStatsJson(outcome, request, { baseline: baselineExtra })
+    log(printed)
+    await writeReportSnapshot(request.saveReport, printed, { ok: note, fail: warn })
     return outcome.code
   }
 
+  let printed: string
   if (request.tree === true) {
-    log(renderMapTree(outcome.projects, { cwd: request.cwd, expand: request.expand === true }))
-    if (comparison !== null) log(renderBaselineCompare(comparison))
-    return outcome.code
+    printed = renderMapTree(outcome.projects, { cwd: request.cwd, expand: request.expand === true })
+    if (comparison !== null) printed += '\n' + renderBaselineCompare(comparison)
+  } else {
+    printed = renderStatsReport(outcome, {
+      cwd: request.cwd,
+      expand: request.expand === true,
+      topN: request.topN ?? 10,
+      by: request.by ?? null,
+      licenses: request.licenses === true || request.by === 'licenses',
+      audit: auditFocus(request),
+    })
+    if (comparison !== null) printed += '\n' + renderBaselineCompare(comparison)
   }
-
-  log(renderStatsReport(outcome, {
-    cwd: request.cwd,
-    expand: request.expand === true,
-    topN: request.topN ?? 10,
-    by: request.by ?? null,
-    licenses: request.licenses === true || request.by === 'licenses',
-    audit: auditFocus(request),
-  }))
-  if (comparison !== null) log(renderBaselineCompare(comparison))
+  log(printed)
+  await writeReportSnapshot(request.saveReport, stripAnsi(printed), { ok: note, fail: warn })
   return outcome.code
 }
 
