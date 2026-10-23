@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { confirm, isCancel, multiselect, outro, select, text } from '@clack/prompts'
 import { collectScan } from './scan.ts'
 import { executeAll } from './delete.ts'
@@ -5,6 +7,7 @@ import { runSearch } from './search.ts'
 import { runMap } from './map.ts'
 import { runStats } from './stats.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
+import { scanForNodeModules } from '../core/walker.ts'
 import { renderScanResult } from '../core/render.ts'
 import { errorLog, log, warn, colors, isTTYOut } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
@@ -38,17 +41,85 @@ export interface WizardOptions {
 /** Wizard quick-scan depth (PRD §7.5 step 2). The menu never supplies --depth; keep one source of truth. */
 const WIZARD_DEPTH = 3
 
+/** v0.8: how many ancestor levels the wizard may rise while scouting for a project root. */
+const WIZARD_MAX_CLIMB = 8
+
+/** What qualifies a directory as a project root when climbing: manifest presence. */
+const PROJECT_MANIFESTS = new Set([
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'yarn.lock',
+  'bun.lock',
+  'bun.lockb',
+])
+
+export interface WizardScope {
+  /** Where the wizard actually scans from (may sit higher than cwd). */
+  root: string
+  /** The cwd the wizard was launched from (kept for the settings display). */
+  from: string
+  /** True when scope was lifted to a manifest ancestor. */
+  climbed: boolean
+  /** True when the cwd itself had nothing and ancestry scouting ran. */
+  scouted: boolean
+}
+
+/** Manifest presence check: one names-only readdir (cheap, read-only). */
+async function hasProjectManifest(dir: string): Promise<boolean> {
+  try {
+    const names = await fs.readdir(dir)
+    for (const name of names) {
+      if (PROJECT_MANIFESTS.has(name)) return true
+    }
+    return false
+  } catch {
+    return false // unreadable ancestor — not a scorable root
+  }
+}
+
+/**
+ * Wizard scope (v0.8): descend-first at the cwd (depth 3, unchanged behavior);
+ * when nothing is found, rise to the nearest manifest ancestor and scope there.
+ * Probes are unsized readdir-only walks; the real pass stays in collectScan. A
+ * manifest ancestor that itself has no node_modules is skipped and the climb
+ * continues (a fresh sub-project must not hide its monorepo root).
+ */
+async function resolveWizardScope(cwd: string): Promise<WizardScope> {
+  const here = await scanForNodeModules([cwd], { maxDepth: WIZARD_DEPTH })
+  if (here.entries.length > 0) return { root: cwd, from: cwd, climbed: false, scouted: false }
+
+  let dir = path.dirname(cwd)
+  for (let hop = 0; hop < WIZARD_MAX_CLIMB && dir !== path.dirname(dir); hop += 1) {
+    if (await hasProjectManifest(dir)) {
+      const probe = await scanForNodeModules([dir], { maxDepth: WIZARD_DEPTH })
+      if (probe.entries.length > 0) return { root: dir, from: cwd, climbed: true, scouted: true }
+    }
+    dir = path.dirname(dir)
+  }
+  return { root: cwd, from: cwd, climbed: false, scouted: true }
+}
+
 /**
  * Piped/CI path: compact banner + read-only scan by default; with --json the output is a bare
  * scan payload — same shape as `nmh scan --json` — so scripts can call `nmh` with no args safely.
  */
 async function runFallbackScan(cwd: string, options: WizardOptions): Promise<number> {
   if (!options.json) log(renderCompactBanner())
-  const outcome = await collectScan({ targets: ['.'], cwd, maxDepth: WIZARD_DEPTH })
+  const scope = await resolveWizardScope(cwd)
+  if (!options.json && scope.climbed) {
+    warn(`no node_modules within 3 levels of cwd — scoped to the project root above: ${scope.root}`)
+  }
+  const outcome = await collectScan({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
   if (outcome.result.entries.length > 0 || options.json) {
-    log(renderScanResult(outcome.result, { cwd, json: options.json === true, sizeMode: 'each' }))
+    log(renderScanResult(outcome.result, { cwd: scope.root, json: options.json === true, sizeMode: 'each' }))
   } else {
     warn('no node_modules found in this folder')
+    if (!options.json && scope.scouted) {
+      warn('project ancestors were scouted too (≤8 hops up) — no node_modules anywhere')
+    }
   }
   warn('the interactive wizard needs a TTY — this was a plain read-only scan; every menu action exists as a command: see nmh --help')
   return outcome.code
@@ -61,9 +132,13 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
  */
 async function runInteractiveWizard(cwd: string, options: WizardOptions): Promise<number> {
   log(renderFullBanner())
+  const scope = await resolveWizardScope(cwd)
+  if (scope.climbed) {
+    log(colors.dim(`cwd has no node_modules in 3 levels — scoped up to the project root ${scope.root}`))
+  }
 
   for (;;) {
-    const scan = await collectScan({ targets: ['.'], cwd, maxDepth: WIZARD_DEPTH })
+    const scan = await collectScan({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
     const entries = scan.result.entries
     if (entries.length === 0) {
       outro('nothing found 🙃')
@@ -103,17 +178,17 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
           warn('search skipped — back to the menu')
           continue
         }
-        await runSearch({ pattern: String(pattern).trim(), targets: ['.'], cwd, maxDepth: WIZARD_DEPTH })
+        await runSearch({ pattern: String(pattern).trim(), targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       }
       case 'map':
-        await runMap({ targets: ['.'], cwd, maxDepth: WIZARD_DEPTH })
+        await runMap({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       case 'stats':
-        await runStats({ targets: ['.'], cwd, maxDepth: WIZARD_DEPTH })
+        await runStats({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       case 'settings':
-        log(renderSettings(options.settings, cwd))
+        log(renderSettings(options.settings, scope))
         break
     }
   }
@@ -208,14 +283,14 @@ async function pickDeleteMode(defaultMode?: DeleteMode): Promise<DeleteMode | nu
 }
 
 /** ⚙️ menu: what .nmhrc is in effect, what it says, and where real config changes happen. */
-function renderSettings(settings: WizardSettings | undefined, cwd: string): string {
+function renderSettings(settings: WizardSettings | undefined, scope: WizardScope): string {
   const values = settings?.values ?? {}
   const row = (key: string, value: string): string => `${colors.dim(key.padEnd(12, ' '))}${value}`
   const list = (items?: string[]): string => (items === undefined || items.length === 0 ? '(none)' : `${items.length}: ${items.join(', ')}`)
   return [
     '',
     colors.bold('⚙  settings & integration'),
-    row('cwd', cwd),
+    row('cwd', scope.climbed ? `${scope.from} → scoped up to ${scope.root}` : scope.from),
     row('config', settings?.source ?? 'none found (.nmhrc in cwd → home)'),
     row('defaultMode', values.defaultMode ?? 'trash (wizard keeps it safe by default)'),
     row('depth', values.depth !== undefined ? String(values.depth) : 'default 3 here — flag --depth <n> overrides'),
