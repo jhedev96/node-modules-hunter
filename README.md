@@ -38,6 +38,8 @@ nmh stats --by type [dir]          # breakdown per dependency field (dep/dev/opt
 nmh stats --licenses [dir]         # license buckets (+⚠ copyleft inside production deps)
 nmh stats --score / --co2          # experimental: composite bloat score 0-100 / rough CO2 estimate
 nmh stats --online [dir]           # deprecated scan: offline manifests + lazy cached registry fallback
+nmh stats --graph [dir]            # dependency graph from the project lockfile — npm/yarn/pnpm/bun, no deps
+nmh stats --reinstall [dir]        # naive npm-ci-style "how long to reinstall everything" estimate
 nmh stats -g                       # global installs across npm/pnpm/yarn/bun — read-only analysis
 nmh why <pkg> [dir…]               # reverse depend: where is <pkg> and what requires it — read-only
 nmh treemap [dir]                  # single-file interactive HTML treemap → nmh-treemap.html
@@ -73,8 +75,10 @@ Search patterns: plain text is a case-insensitive substring (`nmh search lodash`
 | `--why <pkg>` | Same as the `why` command, mixed into any read-only form |
 | `--phantom` / `--dead` | With `stats`: best-effort regex audit — imports declared nowhere / declared+installed packages nobody imports |
 | `--score` / `--co2` / `--licenses` / `--online` | With `stats` (focused views): experimental bloat score 0–100 (waste % + dup factor + dead % + size, grade A–F) / rough CO2 estimate (g CO2e per GB-year + per redownload) / license buckets with copyleft flag / deprecated check (offline manifests + lazy cached registry fallback for missing notes) |
+| `--graph` | With `stats` (focused view): dependency graph from the project lockfile — npm `package-lock.json` v2/v3, `yarn.lock` v1, `pnpm-lock.yaml`, `bun.lock` (zero new dependencies); edges + BFS depth histogram; unusable lockfiles stay honestly manifest-grade. Also powers `nmh why` (lockfile-grade required-by) |
 | `--save-report <file>` / `--report <file>` | `scan`, `map`, `search`, `stats`: **also** write the printed report to a file — format picked by extension `.json` / `.md` / `.txt` (write failure = warning, exit unchanged) |
 | `--treemap [file]` / `--out <file>` | `nmh treemap <dirs>`: export one self-contained interactive HTML treemap (default `nmh-treemap.html`); `--json` prints the raw data instead |
+| `--reinstall` | With `stats` (focused view): naive npm-ci-style estimate of how long re-installing everything takes (pkg × 60 ms + bytes / 50 MB/s + 3 s per native-family build); assumptions surfaced in the JSON, labeled naif |
 | `--animate` / `--no-animate` | Live size counter while measuring: auto = real TTY only, `--animate` forces it even when piped; always suppressed under `--json`; `.nmhrc animate:false` mutes it |
 | `--update-check` | Opt-in: peek npm for a newer release (non-blocking, 24 h cache, notice on stderr; also `updateCheck` in `.nmhrc`) |
 | `--config <file>` | Use this config file instead of the `.nmhrc` lookup (cwd → `$HOME`) |
@@ -267,6 +271,32 @@ $ nmh treemap ./my-repo --out viz.html     # custom path; nmh treemap . --json =
 
 **`--save-report` everywhere** — the report export is no longer scan-only: `map`, `search`, and `stats` accept `--save-report`/`--report` with the exact scan semantics (the printed report, format by extension `.json`/`.md`/`.txt`, ANSI stripped for text, write failure = warning and the exit code never changes). `treemap` refuses it — its HTML file IS the report.
 
+### Lockfile graph & reinstall (v0.6)
+
+The dependency graph finally stops being a heuristic. `--graph` parses the project lockfile (**zero new dependencies**): npm `package-lock.json` v2/v3, `yarn.lock` v1 (plus the sibling `package.json` for the root), `pnpm-lock.yaml` via a lockfile-subset mini-YAML parser (v9 `snapshots:` edges, v6 `packages:` edges, peer-suffixed keys reduced to the bare name), and Bun ≥1.2 `bun.lock` (jsonc-flavored text). The first usable lockfile wins (npm → yarn → pnpm → bun); anything outside the known shapes — including the `bun.lockb` binary — is honestly reported as **manifest-grade**:
+
+```bash
+$ nmh stats ./my-repo --graph
+━━━ GRAPH ━━━ (lockfile-grade)
+root direct   : 9 declared → 145 tree nodes via 138 edges
+depth  1    : █████████            9
+depth  2    : ████████████████████ 39
+depth  3    : ████████████████████ 29
++ 54 node(s) unreachable from the root (optional/peer pruning)
+· ~/my-repo/node_modules  npm package-lock.json · 145 nodes · 138 edges · direct 9
+```
+
+`nmh why` upgrades with it: when a lockfile exists, required-by is **lockfile-grade** — the full transitive requirer set (transitive packages stop being "orphans"), sibling manifests stay the fallback otherwise.
+
+**`--reinstall`** answers the other classic question — "kalau aku copy-paste folder ini ke server baru, berapa lama pasang ulangnya?" — with a deliberately naive model (60 ms/package + flat 50 MB/s + 3 s per native-family build, `sharp`/`grpc`/`better-sqlite3` style proxies) and every assumption surfaced in the JSON:
+
+```bash
+$ nmh stats ./my-repo --reinstall
+━━━ REINSTALL ━━━ (naif)
+pasang ulang semuanya sekali : ~6.7s
+· 94 pkg × 60 ms + 50.8 MB / 50 MB/s + 0 native × 3 s
+```
+
 ## Safety first (the whole point)
 
 - **Guards refuse to delete** (exit code `3`): the filesystem root, `$HOME` itself, anything not named exactly `node_modules`, and targets with unresolvable paths (symlink loops).
@@ -350,7 +380,7 @@ For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your 
 
 ## Roadmap
 
-v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 added the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. v0.5 adds the **vision & hygiene extras: license scan (`--licenses`/`--by licenses` with the copyleft-in-prod ⚠), the experimental Bloat Score (`--score`) and CO2 estimate (`--co2`), the deprecated check (`--online`, offline manifests + lazy cached registry fallback), the `nmh treemap` single-file HTML export and `--save-report` for map/search/stats**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): true lockfile parsing (pnpm/yaml-grade graphs), npm publish & docs polish (v1.0).
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 added the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. v0.5 added the **vision & hygiene extras: license scan (`--licenses`/`--by licenses` with the copyleft-in-prod ⚠), the experimental Bloat Score (`--score`) and CO2 estimate (`--co2`), the deprecated check (`--online`, offline manifests + lazy cached registry fallback), the `nmh treemap` single-file HTML export and `--save-report` for map/search/stats**. v0.6 added the **lockfile-grade graph: `--graph` parses npm/yarn/pnpm/bun lockfiles (zero new dependencies) into a real dependency graph with a BFS depth histogram, `nmh why` upgrades to lockfile-grade required-by (transitive requirers, no more false "orphans"), and `--reinstall` estimates the npm-ci-style reinstall time**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): npm publish & docs polish (v1.0).
 
 ## Development
 
