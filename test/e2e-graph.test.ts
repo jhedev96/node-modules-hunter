@@ -192,7 +192,8 @@ describe('nmh stats --graph', () => {
     try {
       const mapRun = await runCli(['map', '.', '--graph'], { cwd: root, home: root })
       expect(mapRun.code).toBe(1)
-      expect(mapRun.stderr).toContain('--graph only work with the stats command')
+      expect(mapRun.stderr).toContain('only work with the stats command')
+      expect(mapRun.stderr).toContain('--graph')
       const globalRun = await runCli(['stats', '--global', '--graph'], { cwd: root, home: root })
       expect(globalRun.code).toBe(1)
       expect(globalRun.stderr).toContain('shape per-project stats')

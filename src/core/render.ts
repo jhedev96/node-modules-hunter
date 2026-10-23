@@ -2,7 +2,7 @@ import Table from 'cli-table3'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
-import { formatBytes, formatAge, formatCo2 } from '../utils/format.ts'
+import { formatBytes, formatAge, formatCo2, formatDuration } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
 import type {
@@ -579,10 +579,19 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     }
   }
 
+  if (outcome.reinstall !== null) {
+    // --reinstall focus (§8.2 v0.6): naive npm ci-style estimate
+    lines.push('')
+    lines.push(`━━━ ${colors.bold('REINSTALL')} ━━━ ${colors.dim('(naif)')}`)
+    lines.push(`pasang ulang semuanya sekali : ~${formatDuration(outcome.reinstall.seconds)}`)
+    lines.push(colors.dim(`· ${outcome.reinstall.formula}`))
+  }
+
   const focused =
     options.by === 'type' || options.by === 'licenses' || options.licenses === true ||
     outcome.score !== null || outcome.co2 !== null || outcome.deprecations !== null ||
     outcome.graph !== null ||
+    outcome.reinstall !== null ||
     (options.audit ?? null) !== null
 
   if (outcome.depsAudit !== null && (options.audit ?? null) !== null) {
@@ -639,13 +648,13 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
 
 export function renderStatsJson(
   outcome: StatsOutcome,
-  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean; online?: boolean; graph?: boolean },
+  request: { tree?: boolean; topN?: number; by?: 'package' | 'type' | 'size' | 'licenses'; licenses?: boolean; score?: boolean; co2?: boolean; online?: boolean; graph?: boolean; reinstall?: boolean },
   extra?: { baseline?: BaselineJsonExtra },
 ): string {
   const payload = {
     nmh: toolVersion(),
     command: 'stats',
-    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.graph === true ? 'graph' : request.licenses === true ? 'licenses' : request.online === true ? 'deprecated' : 'report'),
+    mode: request.tree === true ? 'tree' : request.by ?? (request.score === true ? 'score' : request.co2 === true ? 'co2' : request.graph === true ? 'graph' : request.reinstall === true ? 'reinstall' : request.licenses === true ? 'licenses' : request.online === true ? 'deprecated' : 'report'),
     baseline: extra?.baseline ?? null,
     overview: outcome.overview,
     permissionIssues: outcome.permissionIssues,
@@ -656,6 +665,7 @@ export function renderStatsJson(
     graph: outcome.graph,
     score: outcome.score,
     co2: outcome.co2,
+    reinstall: outcome.reinstall,
     deprecations: outcome.deprecations,
     depsAudit: outcome.depsAudit,
     projects: outcome.projects.map((project) => ({

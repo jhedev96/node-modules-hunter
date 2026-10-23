@@ -46,3 +46,13 @@ export function formatCo2(grams: number): string {
   if (Math.abs(grams) >= 0.1) return `${grams.toFixed(2)} g CO2e`
   return `${grams.toFixed(3)} g CO2e`
 }
+
+/** Durations: sub-minute keeps one decimal, then m/h. */
+export function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds % 60)
+  if (minutes < 60) return `${minutes}m ${rest}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}

@@ -162,8 +162,7 @@ export interface GraphEntryRow {
   edges: number
 }
 
-export interface GraphOutcome {
-  totalEntries: number
+export interface GraphOutcome {  totalEntries: number
   /** Entries whose graph came from a real lockfile. */
   fullEntries: number
   /** Σ direct deps declared by every project root (lockfile view). */
@@ -198,11 +197,31 @@ export interface StatsOutcome {
   score: BloatScore | null
   /** --co2: order-of-magnitude carbon estimate (null when the flag is absent). */
   co2: Co2Estimate | null
+  /** --reinstall: naive time estimate to re-install everything (null when absent). */
+  reinstall: ReinstallEstimate | null
   /** deprecated sightings (null unless --deprecated/-d or --online ran). */
   deprecations: DeprecationsOutcome | null
   /** --phantom/--dead: best-effort import audit; null when the flags are absent. */
   depsAudit: DepsAudit | null
   permissionIssues: string[]
+}
+
+/**
+ * --reinstall (PRD §8.2, v0.6): naive npm-ci-style re-install time estimate.
+ * By contract NAIF: a fixed per-package overhead, a flat bytes-per-second
+ * throughput and a name-based proxy for native builds — no real measurements.
+ */
+export interface ReinstallEstimate {
+  seconds: number
+  packages: number
+  /** Distinct packages whose name hits a known native-heavy family (proxy). */
+  nativePackages: number
+  /** Human-readable component breakdown, e.g. '482 pkg × 60 ms + 1.2 GB / 50 MB/s + 2 native × 3 s'. */
+  formula: string
+  /** Assumption constants surfaced for JSON transparency. */
+  msPerPackage: number
+  bytesPerSecond: number
+  nativeMs: number
 }
 
 export interface StatsTypeBreakdown {

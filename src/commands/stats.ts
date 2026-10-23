@@ -1,7 +1,7 @@
 import { createLimiter } from '../utils/limit.ts'
 import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog } from '../utils/logger.ts'
 import { writeReportSnapshot } from '../utils/report.ts'
-import { stripAnsi } from '../utils/format.ts'
+import { stripAnsi, formatBytes } from '../utils/format.ts'
 import {
   snapshotFromStats,
   saveBaseline,
@@ -21,7 +21,7 @@ import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readP
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
 import { registryDeprecated, registryDeprecatedCacheDir, MAX_REGISTRY_DEPRECATED_FETCHES } from '../utils/registry-deprecated.ts'
-import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, GraphEntryRow, GraphOutcome, MapPackageRef, MapProjectInfo, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
+import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, GraphEntryRow, GraphOutcome, MapPackageRef, MapProjectInfo, ReinstallEstimate, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
 
 export interface StatsRequest {
   targets: string[]
@@ -59,6 +59,8 @@ export interface StatsRequest {
   online?: boolean
   /** --graph: lockfile-grade dependency graph (npm package-lock v2/v3, per project). */
   graph?: boolean
+  /** --reinstall: naive npm-ci-style time estimate to reinstall everything. */
+  reinstall?: boolean
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -218,6 +220,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   const score = request.score === true ? buildScore(overview, depsAudit?.dead.length ?? 0) : null
   const co2 = request.co2 === true ? buildCo2(overview) : null
   const graph = request.graph === true ? buildGraphOutcome(projectsResults) : null
+  const reinstall = request.reinstall === true ? buildReinstall(overview, sizeGroups.map((group) => group.name)) : null
   const deprecations = request.online === true
     ? await collectDeprecations(projectsResults, {
         cacheDir: registryDeprecatedCacheDir(),
@@ -229,7 +232,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
   verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
-  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, graph, score, co2, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
+  return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, graph, score, co2, reinstall, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
 }
 
 /**
@@ -320,6 +323,49 @@ export function buildCo2(overview: StatsOverview): Co2Estimate {
     storageGrams: round2(gb * STORAGE_GCO2_PER_GB_YEAR),
     transferGrams: round2(gb * TRANSFER_GCO2_PER_GB),
   }
+}
+
+/** --reinstall (PRD §8.2, v0.6): naive re-install model. 60 ms/package covers
+ * registry bookkeeping + tarball unpack on a warm SSD; 50 MB/s is a flat
+ * download+extract throughput; 3 s per native-family install proxies
+ * postinstall gyp/bindings builds. Published numbers vary ±2× per machine —
+ * labeled naif on purpose, useful for "is touching this worth it" scaling. */
+export const REINSTALL_MS_PER_PACKAGE = 60
+export const REINSTALL_BYTES_PER_SECOND = 50 * 1024 * 1024
+export const REINSTALL_NATIVE_MS = 3000
+export const REINSTALL_NATIVE_FAMILIES = [
+  'sharp', 'grpc', 'better-sqlite3', 'sqlite3', 'canvas', 'bcrypt',
+  'node-pty', 'tree-sitter', 'fsevents', 'fibers', 'node-sass', 'oracledb',
+]
+
+export function buildReinstall(overview: StatsOverview, packageNames: Iterable<string>): ReinstallEstimate {
+  const nativePackages = buildReinstallNativeCount(packageNames)
+  const bytesPerSecond = REINSTALL_BYTES_PER_SECOND
+  const packageMs = overview.instances * REINSTALL_MS_PER_PACKAGE
+  const readMs = overview.totalSize / bytesPerSecond * 1000
+  const nativeMs = nativePackages * REINSTALL_NATIVE_MS
+  const seconds = round1((packageMs + readMs + nativeMs) / 1000)
+  const formula =
+    `${overview.instances} pkg × 60 ms + ${formatBytes(overview.totalSize)} / 50 MB/s + ${nativePackages} native × 3 s`
+  return {
+    seconds,
+    packages: overview.instances,
+    nativePackages,
+    formula,
+    msPerPackage: REINSTALL_MS_PER_PACKAGE,
+    bytesPerSecond,
+    nativeMs: REINSTALL_NATIVE_MS,
+  }
+}
+
+/** Distinct names hitting a native-heavy family substring (case-insensitive proxy). */
+export function buildReinstallNativeCount(packageNames: Iterable<string>): number {
+  const native = new Set<string>()
+  for (const name of packageNames) {
+    const lower = name.toLowerCase()
+    if (REINSTALL_NATIVE_FAMILIES.some((family) => lower.includes(family))) native.add(name)
+  }
+  return native.size
 }
 
 /**
