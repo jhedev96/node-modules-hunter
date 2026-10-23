@@ -2,7 +2,7 @@ import { log, warn, verboseLog } from '../utils/logger.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, createDepClassifier, ownManifestRequires, packageVersion } from '../core/packages.ts'
-import { readNpmLockGraph } from '../core/lockfile.ts'
+import { readProjectLockGraph } from '../core/lockfile.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderWhyReport, renderWhyJson } from '../core/render.ts'
 import type { WhyInstanceInfo, WhyOutcome } from '../core/result.ts'
@@ -25,8 +25,9 @@ export interface WhyRequest {
  * --why <pkg> (PRD §8.6 #5 / §8.2 reverse depend): for every installed instance of
  * the target, report the owning node_modules, the project/manifest declaration and
  * who requires it. Required-by is lockfile-grade when the project carries a
- * parseable npm lockfile (v2/v3) — full transitive requirers, field 'lockfile' —
- * otherwise a best-effort sibling-manifest scan. Symlinks are never followed.
+ * parseable lockfile (npm v2/v3, yarn v1 — see core/lockfile.ts) — full transitive
+ * requirers, field 'lockfile' — otherwise a best-effort sibling-manifest scan.
+ * Symlinks are never followed.
  */
 export async function runWhy(request: WhyRequest): Promise<number> {
   const scan = await collectScan({
@@ -54,7 +55,7 @@ export async function runWhy(request: WhyRequest): Promise<number> {
     // requirer in the project, not just top-level siblings. Names-only edges →
     // requirer version stays null; falls back to sibling manifests with no
     // lockfile (grade 'manifest').
-    const lock = await readNpmLockGraph(path.dirname(entry.path))
+    const lock = await readProjectLockGraph(path.dirname(entry.path))
     let requiredBy: WhyInstanceInfo['requiredBy']
     let requiredByGrade: WhyInstanceInfo['requiredByGrade']
     if (lock !== null) {

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import path from 'node:path'
 
 /**
  * Lockfile-grade dependency graph (PRD §8.2, deferred from v0.4 → v0.5 → v0.6).
@@ -159,4 +160,102 @@ export async function readNpmLockGraph(projectDir: string, file = 'package-lock.
   const hosts = doc as Record<string, unknown>
   const parsed = typeof hosts.packages === 'object' && hosts.packages !== null ? parseNpmLockPackages(doc as never) : null
   return buildGraph('npm', file, parsed)
+}
+
+/** First usable lockfile wins — npm, then yarn v1; pnpm/bun land in later slices. */
+export async function readProjectLockGraph(projectDir: string): Promise<LockGraph | null> {
+  return (await readNpmLockGraph(projectDir)) ?? (await readYarnLockGraph(projectDir)) ?? null
+}
+
+/**
+ * yarn.lock (classic v1) PLUS the sibling package.json. Yarn v1 stores no root
+ * deps, so the project manifest supplies rootDirect and the root edges; entry
+ * `dependencies:` sub-blocks supply the tree edges (optionalDependencies are
+ * skipped, same as the npm parser — they surface as `unreachable` when absent).
+ * Yarn Berry (a YAML file with `__metadata:` / `npm:`-protocol specs) is refused
+ * here → null; it lands with the YAML micro-parser (v0.6 slice C).
+ */
+export async function readYarnLockGraph(projectDir: string): Promise<LockGraph | null> {
+  let text: string
+  try {
+    const stat = await fs.stat(path.join(projectDir, 'yarn.lock'))
+    if (!stat.isFile() || stat.size > MAX_LOCKFILE_BYTES) return null
+    text = await fs.readFile(path.join(projectDir, 'yarn.lock'), 'utf8')
+  } catch {
+    return null
+  }
+  const parsed = parseYarnLock(text)
+  if (parsed === null) return null
+
+  // root manifest → rootDirect + root edges (best-effort; absent manifest keeps 0/[])
+  let rootDirect = 0
+  try {
+    const manifest = JSON.parse(await fs.readFile(path.join(projectDir, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, unknown>
+      devDependencies?: Record<string, unknown>
+      optionalDependencies?: Record<string, unknown>
+    }
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
+      const map = manifest[field]
+      if (map === undefined || typeof map !== 'object') continue
+      for (const [name, range] of Object.entries(map)) {
+        if (typeof range !== 'string') continue
+        rootDirect += 1
+        parsed.edges.push({ from: ROOT, to: name, range })
+      }
+    }
+  } catch {
+    // no readable manifest — the tree is still honest, just without root edges
+  }
+  parsed.rootDirect = rootDirect
+  return buildGraph('yarn', 'yarn.lock', parsed)
+}
+
+/**
+ * yarn.lock v1 text state machine:
+ *   header  : `spec1@range, spec2@range:` at column 0 (specs may be quoted)
+ *   body    : `  key "value"` pairs + `  dependencies:` sub-blocks of 4-indented
+ *             `name "range"` pairs
+ *   refusal : yarn Berry (`__metadata:`, `npm:` protocol specs) or no entries
+ */
+export function parseYarnLock(text: string): { edges: LockEdge[]; rootDirect: number; nodeNames: Set<string> } | null {
+  if (text.includes('__metadata:')) return null // Yarn Berry / YAML-era lockfile
+  const lines = text.split('\n')
+  const edges: LockEdge[] = []
+  const nodeNames = new Set<string>()
+  let inDependencies = false
+  let currentName: string | null = null
+  let sawEntry = false
+  for (const raw of lines) {
+    const line = raw.replace(/\r$/, '')
+    if (line.length === 0) {
+      inDependencies = false
+      continue
+    }
+    if (!raw.startsWith(' ') && !raw.startsWith('#')) {
+      // entry header: name the node from its first spec (strip quote wrappers)
+      if (line.includes('npm:') || !line.endsWith(':')) return null
+      const specs = line.slice(0, -1).split(', ')
+      const spec = specs[0]?.trim().replace(/^"|"$/g, '') ?? ''
+      const at = spec.lastIndexOf('@')
+      if (at <= 0) return null
+      currentName = spec.slice(0, at)
+      nodeNames.add(currentName)
+      sawEntry = true
+      inDependencies = false
+      continue
+    }
+    if (currentName === null) continue
+    const body = line.replace(/^\s+/, '')
+    if (/^(dependencies|optionalDependencies|peerDependencies):$/.test(body)) {
+      inDependencies = body === 'dependencies:'
+      continue
+    }
+    if (inDependencies) {
+      const match = /^"?(.+?)"?\s+"([^"]+)"$/.exec(body)
+      if (match !== null) edges.push({ from: currentName, to: match[1]!, range: match[2]! })
+    }
+  }
+  if (!sawEntry) return null
+  return { edges, rootDirect: 0, nodeNames }
 }

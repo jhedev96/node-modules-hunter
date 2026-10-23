@@ -14,7 +14,7 @@ import {
 } from '../utils/baseline.ts'
 import { toolVersion } from '../utils/version.ts'
 import { collectDepsAudit } from '../core/deps-audit.ts'
-import { readNpmLockGraph, type LockGraph } from '../core/lockfile.ts'
+import { readProjectLockGraph, type LockGraph } from '../core/lockfile.ts'
 import path from 'node:path'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, deprecatedOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
@@ -116,7 +116,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
         measuredEntries += 1
         progressLine(`⠋ analyzing ${measuredEntries}/${entryCount} node_modules…`)
         const graph = request.graph === true
-          ? await readNpmLockGraph(declared?.projectDir ?? path.dirname(entry.path))
+          ? await readProjectLockGraph(declared?.projectDir ?? path.dirname(entry.path))
           : undefined
         return { entry, project, topPackages, declared, graph }
       }),
