@@ -27,7 +27,7 @@ Node.js ≥ 18 required.
 ## Usage
 
 ```
-nmh                                # interactive wizard (scan cwd → checkbox → pick mode → confirm)
+nmh                                # interactive wizard: arrow menu (delete all / pick / search / map / report / settings)
 nmh <path> [path…]                 # shortcut: scan given path(s)
 nmh scan [dir]                     # full scan (default: cwd)
 nmh clean [dir]                    # scan + delete everything safe (trash by default)
@@ -45,7 +45,7 @@ nmh why <pkg> [dir…]               # reverse depend: where is <pkg> and what r
 nmh treemap [dir]                  # single-file interactive HTML treemap → nmh-treemap.html
 
 nmh --dir=A,B,glob/*/node_modules  # targets: comma list, globs, ~ — combine with flags below
-nmh version | --version | -v
+nmh version | --version | -v        # banner: tool version, node+abi, OS/arch/kernel distro, tty — --json for plain fields
 nmh help    | --help    | -h
 ```
 
@@ -297,6 +297,22 @@ pasang ulang semuanya sekali : ~6.7s
 · 94 pkg × 60 ms + 50.8 MB / 50 MB/s + 0 native × 3 s
 ```
 
+### Wizard menu (v0.7 — PRD §7.5, the whole menu)
+
+`nmh` with no arguments opens with a compact banner box, quick-scans the cwd (depth 3) and offers an arrow-key menu:
+
+| Key | |
+| --- | --- |
+| 🗑️ Delete everything found | guards run first (blocked targets are surfaced), then trash/hard mode + confirm + guarded execution |
+| ☑️ Pick manually | the v0.1 checkbox flow — space to select, then mode + confirm |
+| 🔍 Search packages | type a pattern (substring, glob, `/regex/`) — same output as `nmh search` |
+| 🗺️ Map dependencies | same project → PM → declared-deps table as `nmh map` |
+| 📊 Detailed report | the full `nmh stats` read-out for this tree |
+| ⚙️ Settings & integration | the active `.nmhrc` (source path + values) — read-only |
+| ⏹ Exit | `esc` also exits |
+
+Read-only items return to the menu; a delete run ends with the freed-space summary and the rescue-log pointer. Non-TTY (piped/CI): no menu — a compact one-line banner + a read-only scan, and `--json` suppresses even that for clean machine output.
+
 ## Safety first (the whole point)
 
 - **Guards refuse to delete** (exit code `3`): the filesystem root, `$HOME` itself, anything not named exactly `node_modules`, and targets with unresolvable paths (symlink loops).
@@ -380,7 +396,7 @@ For settings you always repeat, drop a `.nmhrc` (or `.nmhrc.json`) next to your 
 
 ## Roadmap
 
-v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 added the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. v0.5 added the **vision & hygiene extras: license scan (`--licenses`/`--by licenses` with the copyleft-in-prod ⚠), the experimental Bloat Score (`--score`) and CO2 estimate (`--co2`), the deprecated check (`--online`, offline manifests + lazy cached registry fallback), the `nmh treemap` single-file HTML export and `--save-report` for map/search/stats**. v0.6 added the **lockfile-grade graph: `--graph` parses npm/yarn/pnpm/bun lockfiles (zero new dependencies) into a real dependency graph with a BFS depth histogram, `nmh why` upgrades to lockfile-grade required-by (transitive requirers, no more false "orphans"), and `--reinstall` estimates the npm-ci-style reinstall time**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): npm publish & docs polish (v1.0).
+v0.1 shipped the MVP (scan · size · delete · wizard · guards · PM detection). v0.2 added **search, map, `--depend`, `-r` recursive audit and the `--pm` / `--exclude` / `--keep` / `--depth` / `--expand` filters**. v0.3 added the **`stats` suite (dup factor, waste, top-N, per-package tree), `stats -g` global analysis across PMs, report export (`--save-report`/`--report`), `--animate` and the `.nmhrc` config file**. v0.4 added the **analytics deep-cut: baselines (`--save-baseline`/`--compare`/`--history`), dedup suggestions with per-copy declared ranges, `nmh why`, the real `--by type` breakdown, the `--phantom`/`--dead` best-effort import audit and the opt-in `--update-check`**. v0.5 added the **vision & hygiene extras: license scan (`--licenses`/`--by licenses` with the copyleft-in-prod ⚠), the experimental Bloat Score (`--score`) and CO2 estimate (`--co2`), the deprecated check (`--online`, offline manifests + lazy cached registry fallback), the `nmh treemap` single-file HTML export and `--save-report` for map/search/stats**. v0.6 added the **lockfile-grade graph: `--graph` parses npm/yarn/pnpm/bun lockfiles (zero new dependencies) into a real dependency graph with a BFS depth histogram, `nmh why` upgrades to lockfile-grade required-by (transitive requirers, no more false "orphans"), and `--reinstall` estimates the npm-ci-style reinstall time**. v0.7 added the **full PRD §7.5 wizard menu (delete all / pick / search / map / detailed report / settings, with loop-backs), a serious banner box (TTY) + compact one-liner (non-TTY, `--json`-clean), and a richer `nmh version` (node + abi + OS/arch/kernel + tty, `--json`)**. Still ahead per [PROPOSAL.md](./PROPOSAL.md): npm publish & docs polish (v1.0).
 
 ## Development
 

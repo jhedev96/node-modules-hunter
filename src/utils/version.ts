@@ -40,7 +40,8 @@ export function versionDetail(): VersionDetail {
   let distro: string | null = null
   try {
     const value = os.version()
-    if (typeof value === 'string' && value.trim().length > 0) distro = value.trim()
+    // Linux kernel build stamps ('#1 SMP …') appear when no os-release exists — those are kernel noise, not a distro.
+    if (typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('#')) distro = value.trim()
   } catch {
     distro = null
   }
