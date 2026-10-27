@@ -4,6 +4,10 @@
   "description": "Hunt down bloated node_modules folders across your machine — scan, measure, and clean them with one command.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhedev96/node-modules-hunter.git"
+  },
   "bin": {
     "nmh": "dist/cli.js",
     "node-modules-hunter": "dist/cli.js"
