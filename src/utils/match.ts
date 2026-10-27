@@ -81,10 +81,25 @@ export function globToRegExp(pattern: string, flags = ''): RegExp {
 
 export type PathMatcher = (candidate: string) => boolean
 
+/** Hard caps that keep pathological globs from turning into catastrophic-backtracking regexes
+ * (v0.9.4) — a pattern is user input, never trust it with arbitrary complexity. */
+const MAX_PATTERN_LENGTH = 512
+const MAX_DOUBLE_STARS = 8
+
 export function makeGlobMatcher(
   patterns: string[],
   options: { caseInsensitive?: boolean } = {},
 ): PathMatcher {
+  for (const pattern of patterns) {
+    if (pattern.length > MAX_PATTERN_LENGTH) {
+      throw new Error(`glob pattern too long (>${MAX_PATTERN_LENGTH} chars): ${pattern.slice(0, 40)}…`)
+    }
+    // `**/` translates to nested quantifiers — the only ReDoS-capable shape here
+    const stars = (pattern.match(/\*\*/g) ?? []).length
+    if (stars > MAX_DOUBLE_STARS) {
+      throw new Error(`glob pattern too complex (>${MAX_DOUBLE_STARS} '**'): ${pattern.slice(0, 40)}…`)
+    }
+  }
   const flag = options.caseInsensitive || process.platform === 'win32' ? 'i' : ''
   const regexps = patterns.map((pattern) => globToRegExp(pattern, flag))
   return (candidate: string) => {

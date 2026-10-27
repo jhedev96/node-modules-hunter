@@ -1,7 +1,7 @@
 import { cac } from 'cac'
 import path from 'node:path'
 import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
-import { splitTargets } from './utils/paths.ts'
+import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { loadConfig, ConfigError } from './utils/config.ts'
@@ -306,6 +306,17 @@ async function main(): Promise<number> {
   if (reportPath !== null && (deleted.given || subcommand === 'clean')) {
     errorLog('--save-report rides along with scan — delete/clean runs are not scan reports')
     return 1
+  }
+
+  // v0.9.4: a delete op aimed at the filesystem root is always a mistake — the scan would
+  // wander every mount to find victims; point --dir at the project instead
+  if (deleted.given || subcommand === 'clean') {
+    for (const candidate of targets.length > 0 ? targets : ['']) {
+      if (isRootPath(path.resolve(cwd, candidate))) {
+        errorLog('refusing a delete op over the filesystem root — point --dir at the project directory you want cleaned')
+        return 1
+      }
+    }
   }
 
   const scanOptions = {

@@ -19,7 +19,7 @@ interface DeprecatedPayload {
  * fresh is fine (no note, registry answers "no deprecation"); reg-only has no
  * local note — only the registry fixture knows it's deprecated.
  */
-async function fixture(label: string): Promise<string> {
+async function fixture(label: string, opts: { ansi?: boolean } = {}): Promise<string> {
   const root = await tmpRoot(label)
   const web = path.join(root, 'web')
   const pkgs: Array<[string, boolean, string | undefined]> = [
@@ -27,6 +27,9 @@ async function fixture(label: string): Promise<string> {
     ['fresh', false, undefined],
     ['reg-only', false, undefined],
   ]
+  if (opts.ansi) {
+    pkgs.push(['ansi-pkg', false, '\u001b[31mBAD note still readable\u001b[0m'])
+  }
   for (const [name, , note] of pkgs) {
     const pkgDir = path.join(web, 'node_modules', name)
     await fs.mkdir(pkgDir, { recursive: true })
@@ -37,7 +40,16 @@ async function fixture(label: string): Promise<string> {
   }
   await fs.writeFile(
     path.join(web, 'package.json'),
-    JSON.stringify({ name: 'web', version: '1.0.0', dependencies: { 'old-lodash': '^4', fresh: '^1', 'reg-only': '^1' } }),
+    JSON.stringify({
+      name: 'web',
+      version: '1.0.0',
+      dependencies: {
+        'old-lodash': '^4',
+        fresh: '^1',
+        'reg-only': '^1',
+        ...(opts.ansi ? { 'ansi-pkg': '^1' } : {}),
+      },
+    }),
   )
   return root
 }
@@ -122,8 +134,27 @@ describe('deprecated scan e2e (--online)', () => {
     }
   })
 
-  it('guards: --online outside stats exits 1', async () => {
-    const root = await fixture('dep-guard')
+  it('strips ANSI escape bytes from deprecated notes (manifest text, v0.9.4)', async () => {
+    const root = await fixture('dep-ansi', { ansi: true })
+    try {
+      const run = await runCli(['stats', '.', '--online', '--json'], { cwd: root, home: root })
+      expect(run.code).toBe(0)
+      const json = JSON.parse(run.stdout) as DeprecatedPayload
+      const ref = json.deprecations?.refs.find((item) => item.name === 'ansi-pkg')
+      expect(ref).toBeDefined()
+      expect(ref && JSON.stringify(ref)).not.toMatch(/\x1b/)
+      expect(ref?.message).toBe('BAD note still readable')
+      // note text unchanged apart from the escape stripping
+      expect(json.deprecations?.count).toBeGreaterThanOrEqual(1)
+      const text = await runCli(['stats', '.', '--online'], { cwd: root, home: root })
+      expect(text.stdout).not.toMatch(/\x1b\[31m/)
+      expect(text.stdout).toContain('BAD note still readable')
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('guards: --online outside stats exits 1', async () => {    const root = await fixture('dep-guard')
     try {
       const misuse = await runCli(['scan', '.', '--online'], { cwd: root, home: root })
       expect(misuse.code).toBe(1)

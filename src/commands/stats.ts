@@ -379,6 +379,8 @@ async function collectDeprecations(
 ): Promise<DeprecationsOutcome> {
   const refs: DeprecatedRef[] = []
   const missing: Array<{ pkg: MapPackageRef; displayPath: string }> = []
+  // v0.9.4: `truncated` means "a 201st item arrived and was refused", not "exactly at the cap"
+  let overflowed = false
   for (const project of projectsResults) {
     for (const pkg of project.topPackages) {
       if (typeof pkg.deprecated === 'string') {
@@ -388,8 +390,11 @@ async function collectDeprecations(
             version: pkg.version,
             displayPath: project.entry.displayPath,
             source: 'manifest',
-            message: pkg.deprecated.length > 200 ? `${pkg.deprecated.slice(0, 197)}…` : pkg.deprecated,
+            // ANSI escape bytes in a manifest note would paint the terminal once rendered
+            message: stripAnsi(pkg.deprecated).length > 200 ? `${stripAnsi(pkg.deprecated).slice(0, 197)}…` : stripAnsi(pkg.deprecated),
           })
+        } else {
+          overflowed = true
         }
       } else if (pkg.deprecated === null && pkg.symlinked === false && pkg.version !== null) {
         missing.push({ pkg, displayPath: project.entry.displayPath })
@@ -410,20 +415,24 @@ async function collectDeprecations(
         fetchLimiter(async () => {
           const answer = await registryDeprecated(hit.pkg.name, hit.pkg.version ?? '', options.cacheDir, options.base)
           const message = answer?.message
-          if (answer !== null && typeof message === 'string' && refs.length < 200) {
-            refs.push({
-              name: hit.pkg.name,
-              version: hit.pkg.version,
-              displayPath: hit.displayPath,
-              source: 'registry',
-              message: message.length > 200 ? `${message.slice(0, 197)}…` : message,
-            })
+          if (answer !== null && typeof message === 'string') {
+            if (refs.length < 200) {
+              refs.push({
+                name: hit.pkg.name,
+                version: hit.pkg.version,
+                displayPath: hit.displayPath,
+                source: 'registry',
+                message: stripAnsi(message).length > 200 ? `${stripAnsi(message).slice(0, 197)}…` : stripAnsi(message),
+              })
+            } else {
+              overflowed = true
+            }
           }
         }),
       ),
     )
   }
-  return { count: refs.length, refs, truncated: refs.length >= 200, online: true }
+  return { count: refs.length, refs, truncated: overflowed, online: true }
 }
 
 /**

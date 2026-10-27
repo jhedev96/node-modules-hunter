@@ -84,3 +84,22 @@ describe('makeSearchMatcher', () => {
     expect(matcher('vue')).toBe(false)
   })
 })
+
+describe('makeGlobMatcher — ReDoS caps (v0.9.4)', () => {
+  it('normal patterns still compile and match', () => {
+    const matcher = makeGlobMatcher(['**/api/**'])
+    expect(matcher('/x/y/api/v1')).toBe(true)
+  })
+
+  it('a pattern longer than 512 chars is rejected up front', () => {
+    expect(() => makeGlobMatcher(['a*'.repeat(300)])).toThrow(/too long/)
+  })
+
+  it('more than 8 ** groups is rejected up front', () => {
+    expect(() => makeGlobMatcher(['**/**/**/**/**/**/**/**/**/x'])).toThrow(/too complex/)
+  })
+
+  it('exactly 8 ** groups still compiles', () => {
+    expect(() => makeGlobMatcher(['**/**/**/**/**/**/**/**/x'])).not.toThrow()
+  })
+})

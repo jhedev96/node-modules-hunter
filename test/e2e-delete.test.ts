@@ -160,4 +160,11 @@ describe('delete flow e2e (spawned CLI, non-TTY)', () => {
       await fs.rm(fx.root, { recursive: true, force: true })
     }
   })
+
+  it('a delete op aimed at the filesystem root refuses before scanning (v0.9.4)', async () => {
+    const run = await runCli(['--dir', '/', '--delete=trash', '-y'])
+    expect(run.code).toBe(1)
+    expect(run.stderr).toContain('refusing a delete op over the filesystem root')
+    // the refusal is pre-scan: no giant walk even started
+  })
 })

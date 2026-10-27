@@ -479,7 +479,12 @@ export async function readBunLockGraph(projectDir: string): Promise<LockGraph | 
   return graph
 }
 
-/** Strip line and block comments plus trailing commas (bun.lock is jsonc-ish). */
+/**
+ * Strip line and block comments plus trailing commas (bun.lock is jsonc-ish),
+ * fully quote-aware: neither comments nor scope-closing commas are recognized
+ * inside a string literal (v0.9.4 — a global trailing-comma regex used to eat
+ * `, }` / `, ]` sequences inside string values, corrupting them silently).
+ */
 export function stripJsonC(text: string): string {
   let out = ''
   let quote: '"' | null = null
@@ -504,6 +509,18 @@ export function stripJsonC(text: string): string {
       i += 1
       continue
     }
+    if (ch === ',') {
+      // jsonc trailing comma: drop it when the next non-whitespace char closes the scope
+      let j = i + 1
+      while (j < text.length && /\s/.test(text[j]!)) j += 1
+      if (text[j] === '}' || text[j] === ']') {
+        i += 1
+        continue
+      }
+      out += ch
+      i += 1
+      continue
+    }
     if (ch === '/' && text[i + 1] === '/') {
       while (i < text.length && text[i] !== '\n') i += 1
       continue
@@ -517,7 +534,7 @@ export function stripJsonC(text: string): string {
     out += ch
     i += 1
   }
-  return out.replace(/,(\s*(?:\}|\]))/g, '$1')
+  return out
 }
 
 /** Extract nodes/edges from a parsed bun.lock document (workspaces + packages). */

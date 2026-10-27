@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { verboseLog } from './logger.ts'
 import { toolVersion } from './version.ts'
@@ -30,7 +31,8 @@ export async function writeDeleteLog(payload: DeleteLogPayload): Promise<string 
   try {
     await fs.mkdir(dir, { recursive: true })
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const file = path.join(dir, `delete-${stamp}.json`)
+    // v0.9.4: a random suffix — two deletes inside the same millisecond used to overwrite one log
+    const file = path.join(dir, `delete-${stamp}-${randomBytes(3).toString('hex')}.json`)
     const body = {
       nmh: toolVersion(),
       timestamp: new Date().toISOString(),
