@@ -334,20 +334,10 @@ export interface WhyOutcome {
   permissionIssues: string[]
 }
 
-/** One phantom/dead row (PRD §8.2, best-effort regex audit — keputusan #7). */
-export interface DepsAuditHit {
-  name: string
-  /** Up to 3 project-relative file paths where it is imported (phantom only). */
-  sites: string[]
-  /** Declaring manifests as `name (field)` (dead only). */
-  declaringProjects: string[]
-}
-
-export interface DepsAudit {
-  scannedFiles: number
-  phantom: DepsAuditHit[]
-  dead: DepsAuditHit[]
-}
+// single canonical definition lives next to the audit implementation (deps-audit.ts);
+// re-exported here so every payload consumer keeps importing from result.ts
+export type { DepsAudit, DepsAuditHit } from './deps-audit.ts'
+import type { DepsAudit } from './deps-audit.ts'
 
 export interface GlobalBinIssue {
   /** package that declares the bin */

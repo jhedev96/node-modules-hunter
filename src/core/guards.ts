@@ -62,3 +62,12 @@ export function describeGuard(verdict: GuardVerdict): string {
 function verdict(code: GuardCode, reason: string): GuardVerdict {
   return { safe: false, code, reason }
 }
+
+// Self-protection constants (moved here in v0.9.3 — they used to live in commands/config.ts,
+// but they guard scans/deletes, not config): the documented special value "self" in exclude/keep.
+export const SELF_TOKEN = 'self'
+
+/** True when an absolute entry path sits inside (or is exactly) the guarded root. */
+export function insideRoot(entryPath: string, root: string): boolean {
+  return entryPath === root || entryPath.startsWith(root + path.sep)
+}

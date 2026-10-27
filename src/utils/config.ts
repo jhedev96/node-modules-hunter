@@ -5,7 +5,15 @@ import { expandTilde } from './paths.ts'
 import { warn, verboseLog } from './logger.ts'
 import type { DeleteMode } from '../core/result.ts'
 
-export class ConfigError extends Error {}
+export class ConfigError extends Error {
+  /** Machine reason for the hand-off in cli.ts — no message string-matching. */
+  readonly code: string
+
+  constructor(message: string, code = 'invalid') {
+    super(message)
+    this.code = code
+  }
+}
 
 export interface NmhConfig {
   /** Default delete mode for bare `--delete` and the wizard's pre-highlighted option. */
@@ -111,7 +119,7 @@ export async function loadConfig(explicitPath: string | null, cwd: string): Prom
     const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw)
     const body = await readMaybe(abs)
     if (body === null) {
-      throw new ConfigError(`config file not found: ${abs}`)
+      throw new ConfigError(`config file not found: ${abs}`, 'file-not-found')
     }
     verboseLog(`config: using ${abs}`)
     return { values: parseConfigBody(body, abs), source: abs }

@@ -190,6 +190,8 @@ function esc(text: string): string {
 }
 
 function fmt(bytes: number | null): string {
+  // fmt is treemap-local on purpose: GB at 2 decimals keeps the dense HTML overlay labels
+  // readable — do NOT fold into the shared formatBytes (1 decimal everywhere).
   if (bytes === null) return '(link)'
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 ** 2).toFixed(1)} MB`

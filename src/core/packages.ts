@@ -51,10 +51,6 @@ export function isCopyleftLicense(type: string): boolean {
   return /(^|\W)(LGPL|AGPL|GPL|MPL)(\W|$)/.test(upper) || upper.includes('GNU GENERAL PUBLIC')
 }
 
-export async function readLicense(pkgDir: string): Promise<string | null> {
-  return licenseOf(await readPackageJson(pkgDir))
-}
-
 /** Deprecated note straight from the installed manifest (PRD §8.2). Boolean `true` → empty note. */
 export function deprecatedOf(manifest: LoosePackageJson | null): string | null {
   if (manifest === null) return null

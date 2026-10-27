@@ -359,15 +359,3 @@ export async function runConfigCommand(request: ConfigCommandRequest): Promise<n
     throw err
   }
 }
-
-/** The documented special value (PRD v0.9): "self" in exclude/keep protects the cwd subtree. */
-export const SELF_TOKEN = 'self'
-
-export function listHasSelf(items: string[] | undefined): boolean {
-  return items?.includes(SELF_TOKEN) === true
-}
-
-/** True when an absolute entry path sits inside (or is exactly) the guarded root. */
-export function insideRoot(entryPath: string, root: string): boolean {
-  return entryPath === root || entryPath.startsWith(root + path.sep)
-}

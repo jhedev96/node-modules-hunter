@@ -142,7 +142,7 @@ async function main(): Promise<number> {
     if (err instanceof ConfigError) {
       // `nmh config` manages the file itself: a to-be-created --config target only exists
       // AFTER a write, so the read-phase lookup must not 404 on it (invalid JSON still fails).
-      const configFamilyBypass = positionals[0] === 'config' && err.message.includes('file not found')
+      const configFamilyBypass = positionals[0] === 'config' && err.code === 'file-not-found'
       if (!configFamilyBypass) {
         errorLog(err.message)
         return 1

@@ -2,14 +2,14 @@ import path, { basename } from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
 import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { formatBytes, stripAnsi } from '../utils/format.ts'
-import { saveReportFile } from '../utils/report.ts'
+import { writeReportSnapshot } from '../utils/report.ts'
 import { resolveRoots } from '../utils/paths.ts'
 import { makeGlobMatcher } from '../utils/match.ts'
 import { scanForNodeModules, type WalkEntry } from '../core/walker.ts'
 import { measureEntries } from '../core/sizer.ts'
 import { createPmDetector } from '../core/pm-detect.ts'
 import { projectNameFor } from '../core/packages.ts'
-import { insideRoot, SELF_TOKEN } from './config.ts'
+import { insideRoot, SELF_TOKEN } from '../core/guards.ts'
 import { renderScanResult, shortenPath } from '../core/render.ts'
 import type { ScanCommandResult, ScanEntry, ScanTotals } from '../core/result.ts'
 
@@ -253,16 +253,12 @@ function renderedScan(result: ScanCommandResult, request: { cwd: string; sizeMod
 async function writeReport(request: ScanRequest, result: ScanCommandResult): Promise<void> {
   if (!request.saveReport) return
   const ext = path.extname(request.saveReport).toLowerCase()
-  try {
-    const content =
-      ext === '.json'
-        ? renderedScan(result, request, true)
-        : stripAnsi(renderedScan(result, request, false))
-    await saveReportFile(request.saveReport, content + '\n')
-    note(`💾 report saved → ${request.saveReport} (${ext.slice(1)})`)
-  } catch (err) {
-    warn(`report write failed — continuing (${err instanceof Error ? err.message : String(err)})`)
-  }
+  const content =
+    ext === '.json'
+      ? renderedScan(result, request, true)
+      : stripAnsi(renderedScan(result, request, false))
+  // v0.9.3: one shared writer — save/notify/warn contract now identical to map/search/stats
+  await writeReportSnapshot(request.saveReport, content, { ok: note, fail: warn })
 }
 
 function emptyResult(targets: string[], unresolvable: string[] = []): ScanCommandResult {

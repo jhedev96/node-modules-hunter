@@ -11,10 +11,6 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`
 }
 
-export function formatCount(value: number): string {
-  return value.toLocaleString('en-US')
-}
-
 /** Compact relative time for table output: now / 5m ago / 2h ago / 3d ago / 7mo ago / 2y ago. */
 export function formatAge(mtimeMs: number | null, now = Date.now()): string {
   if (mtimeMs == null) return '—'

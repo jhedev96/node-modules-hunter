@@ -557,13 +557,13 @@ export async function runStats(request: StatsRequest): Promise<number> {
   let baseForCompare: BaselineSnapshot | null = null
   if (request.saveBaseline !== undefined) {
     if (!validateBaselineName(request.saveBaseline)) {
-      errorLog(`invalid baseline name: '${request.saveBaseline}' (expected letters/digits/._- , max 64)`)
+      errorLog(`invalid baseline name: '${request.saveBaseline}' (expected letters/digits/._-, max 64)`)
       return 1
     }
   }
   if (request.compareBaseline !== undefined) {
     if (!validateBaselineName(request.compareBaseline)) {
-      errorLog(`invalid baseline name: '${request.compareBaseline}' (expected letters/digits/._- , max 64)`)
+      errorLog(`invalid baseline name: '${request.compareBaseline}' (expected letters/digits/._-, max 64)`)
       return 1
     }
     baseForCompare = await loadBaseline(request.compareBaseline)

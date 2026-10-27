@@ -18,7 +18,6 @@ export interface EntryMeasure {
 export interface MeasureProgress {
   measuredEntries: number
   bytesSoFar: number
-  currentEntry: string
 }
 
 type ProgressHook = (progress: MeasureProgress) => void
@@ -91,39 +90,6 @@ export async function countTopLevelPackages(entryPath: string): Promise<number> 
   return (await listTopLevelPackages(entryPath)).length
 }
 
-export interface SizedPackageRef {
-  name: string
-  path: string
-  scope: string | null
-  symlinked: boolean
-  /** Directory size in bytes for real dirs; null for symlinked packages (never followed). */
-  size: number | null
-}
-
-/** Measure package dirs in bulk (bounded concurrency); symlinked packages stay unsized. */
-export async function measurePackageRefs(
-  refs: Array<{ name: string; path: string; scope: string | null; symlinked: boolean }>,
-  concurrency = 8,
-  onProgress?: (done: number, total: number) => void,
-): Promise<SizedPackageRef[]> {
-  const limiter = createLimiter(concurrency)
-  let done = 0
-  const padded = refs.map((ref) => ({ ...ref, size: null as number | null }))
-  await Promise.all(
-    padded.map((ref) =>
-      limiter(async () => {
-        if (!ref.symlinked) {
-          const measure = await measureEntry(ref.path)
-          ref.size = measure.size
-        }
-        done += 1
-        onProgress?.(done, refs.length)
-      }),
-    ),
-  )
-  return padded
-}
-
 export interface MeasureOptions {
   concurrency?: number
   onProgress?: ProgressHook
@@ -150,7 +116,6 @@ export async function measureEntries(
         options.onProgress?.({
           measuredEntries: measured,
           bytesSoFar,
-          currentEntry: entryPath,
         })
       }),
     ),
