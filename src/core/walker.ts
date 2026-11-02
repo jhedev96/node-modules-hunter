@@ -24,14 +24,31 @@ export interface WalkOptions {
   recursive?: boolean
   /** Exclude globs — matched against absolute path, path relative to the walk root, and basename. */
   excludes?: string[]
+  /**
+   * v1.1: skip obvious system noise while DISCOVERING — Trash variants (`.Trash`,
+   * `.Trashes`, `.Trash-<uid>`), the macOS `Library` tree, and `*.app` bundles.
+   * Name-based, anywhere in the tree. Default true (a behavior change vs v1.0);
+   * `--no-skip` restores the bare audit. `.git` stays skipped regardless — git
+   * internals can never contain a node_modules, so walking them is pure cost.
+   */
+  skipSystem?: boolean
   /** Used when a direct node_modules target is walked with -r: entries found inside are nested under it. */
   initialOwner?: string
   onFound?: (entry: WalkEntry) => void
 }
 
+/** The v1.1 discovery skips besides .git (which is unconditional, see WalkOptions). */
+const SYSTEM_SKIP_NAMES = new Set(['.Trash', '.Trashes', 'Library'])
+
+function isSystemNoise(name: string): boolean {
+  return SYSTEM_SKIP_NAMES.has(name) || name.startsWith('.Trash-') || name.endsWith('.app')
+}
+
 /**
  * Find node_modules folders under the given roots.
- * - Skips `.git`; never follows symlinks (cycle/loop traversal impossible; pnpm-safe).
+ * - Skips `.git` always; v1.1 also skips system noise by default (.Trash*, Library,
+ *   *.app — see WalkOptions.skipSystem); never follows symlinks (cycle/loop traversal
+ *   impossible; pnpm-safe).
  * - A found node_modules becomes an owned entry, not a diving board — unless `recursive`.
  * - Walker entries are real dirs; overlapping roots collapse via the visited set.
  *
@@ -44,6 +61,7 @@ export interface WalkOptions {
 export async function scanForNodeModules(roots: string[], options: WalkOptions = {}): Promise<WalkOutcome> {
   const maxDepth = options.maxDepth ?? Number.POSITIVE_INFINITY
   const recursive = options.recursive === true
+  const skipSystem = options.skipSystem !== false
   const isExcluded = options.excludes && options.excludes.length > 0 ? makeGlobMatcher(options.excludes) : null
 
   const entries: WalkEntry[] = []
@@ -92,6 +110,7 @@ export async function scanForNodeModules(roots: string[], options: WalkOptions =
 
         for (const dirent of dirents) {
           if (dirent.name === '.git') continue
+          if (skipSystem && isSystemNoise(dirent.name)) continue
           const child = path.join(job.dir, dirent.name)
           // Classify with lstat, same reason as the sizer: d_type lies on some
           // filesystems, and trusting it would hide real dirs (a missed

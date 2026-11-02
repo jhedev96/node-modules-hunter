@@ -41,6 +41,8 @@ export interface ScanRequest {
   fastSize?: boolean
   /** --sort: result order. Default 'size' desc — the frozen v1.0 order. */
   sort?: SortKey
+  /** --no-skip: don't hide .Trash*, Library/, and *.app dirs while discovering. Default: skip them (v1.1 default change). */
+  skipSystem?: boolean
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -89,6 +91,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
     maxDepth: request.maxDepth,
     recursive: request.recursive,
     excludes: walkExcludes,
+    skipSystem: request.skipSystem,
   })
   const permIssues = [...walk.permissionIssues]
   collected.push(...walk.entries)
@@ -100,6 +103,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
         maxDepth: request.maxDepth,
         recursive: true,
         excludes: walkExcludes,
+        skipSystem: request.skipSystem,
         initialOwner: direct,
       })
       permIssues.push(...inner.permissionIssues)

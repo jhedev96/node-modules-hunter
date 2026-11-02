@@ -34,6 +34,7 @@ cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numer
 cli.option('--stale <days>', 'v1.1: only projects idle >= <days> (git activity signal — last commit, else manifest, else folder mtime)')
 cli.option('--fast-size', 'v1.1: measure with one `du -sk` per entry (KiB granularity) instead of walking every file')
 cli.option('--sort <key>', "v1.1: order results — size (default, desc) | path | idle (oldest project first) | mtime (newest first)")
+cli.option('--no-skip', 'v1.1: audit everything — stop hiding .Trash*, Library/, and *.app dirs during discovery (default: hidden)')
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
@@ -245,6 +246,12 @@ async function main(): Promise<number> {
     sort = key
   }
 
+  // --no-skip (v1.1): cac maps a registered negation to skip:false (default true) —
+  // same mechanics as --no-color (see cliColorExplicit above). There is no flags.noSkip.
+  // Deliberate default flip: v1.0 walked everywhere; v1.1 hides system noise unless
+  // this flag says otherwise (.git stays skipped always — pure cost, zero yield).
+  const skipSystem = flags.skip !== false
+
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
@@ -379,6 +386,7 @@ async function main(): Promise<number> {
     stale,
     fastSize,
     sort,
+    skipSystem,
   }
 
   if (subcommand === 'version') {
@@ -686,6 +694,7 @@ async function main(): Promise<number> {
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       maxDepth: effectiveDepth,
       stale,
+      skipSystem,
     })
   }
 
@@ -704,6 +713,7 @@ async function main(): Promise<number> {
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       maxDepth: effectiveDepth,
       stale,
+      skipSystem,
     })
   }
 
