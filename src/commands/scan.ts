@@ -6,7 +6,8 @@ import { writeReportSnapshot } from '../utils/report.ts'
 import { resolveRoots } from '../utils/paths.ts'
 import { makeGlobMatcher } from '../utils/match.ts'
 import { scanForNodeModules, type WalkEntry } from '../core/walker.ts'
-import { measureEntries } from '../core/sizer.ts'
+import { measureEntries, type EntryMeasure } from '../core/sizer.ts'
+import { measureEntryFast } from '../core/du-size.ts'
 import { computeActivity, type Activity } from '../core/activity.ts'
 import { createPmDetector } from '../core/pm-detect.ts'
 import { projectNameFor } from '../core/packages.ts'
@@ -36,6 +37,8 @@ export interface ScanRequest {
   expand?: boolean
   /** --stale <days>: keep only entries whose project was idle >= <days> (v1.1 git activity signal). */
   stale?: number
+  /** --fast-size: measure with one `du -sk` per entry (KiB granularity) instead of the file walker. */
+  fastSize?: boolean
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -103,19 +106,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   const entryPaths = [...metaByPath.keys()]
   verboseLog(`found ${entryPaths.length} node_modules — measuring`)
 
-  const entryCount = entryPaths.length
-  let bytesSoFar = 0
-  let measuredCount = 0
-  const measures = await measureEntries(entryPaths, permIssues, {
-    concurrency: 4,
-    onProgress: (progress) => {
-      measuredCount = progress.measuredEntries
-      bytesSoFar = progress.bytesSoFar
-      progressLine(
-        `⠋ measuring ${measuredCount}/${entryCount} folders · ${formatBytes(bytesSoFar)}`,
-      )
-    },
-  })
+  const measures = await collectMeasures(entryPaths, request.fastSize === true, permIssues)
   clearProgress()
 
   const detect = createPmDetector()
@@ -194,6 +185,71 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   if (entries.length === 0) code = 2
   else if (permIssues.length > 0) code = 4
   return { code, result }
+}
+
+/**
+ * Measure every entry. Default: the exact file walker. With --fast-size (v1.1):
+ * one `du -sk` per entry — KiB granularity, one syscall instead of thousands of
+ * stat calls; anything du can't answer falls back silently to the walker
+ * (Windows has no du, so it always walks). Progress keeps the same shape.
+ */
+async function collectMeasures(
+  entryPaths: string[],
+  fastSize: boolean,
+  permIssues: string[],
+): Promise<Map<string, EntryMeasure>> {
+  const entryCount = entryPaths.length
+  let measuredCount = 0
+  let bytesSoFar = 0
+  const bump = (): void => {
+    progressLine(`⠋ measuring ${measuredCount}/${entryCount} folders · ${formatBytes(bytesSoFar)}`)
+  }
+  if (!fastSize) {
+    return measureEntries(entryPaths, permIssues, {
+      concurrency: 4,
+      onProgress: (progress) => {
+        measuredCount = progress.measuredEntries
+        bytesSoFar = progress.bytesSoFar
+        bump()
+      },
+    })
+  }
+
+  const measures = new Map<string, EntryMeasure>()
+  const duLimiter = createLimiter(8)
+  const fallbackPaths: string[] = []
+  await Promise.all(
+    entryPaths.map((entryPath) =>
+      duLimiter(async () => {
+        const fast = await measureEntryFast(entryPath)
+        if (fast === null) {
+          fallbackPaths.push(entryPath)
+          return
+        }
+        measures.set(entryPath, fast)
+        measuredCount += 1
+        bytesSoFar += fast.size
+        bump()
+      }),
+    ),
+  )
+  verboseLog(
+    `fast-size: ${measures.size} entr${measures.size === 1 ? 'y' : 'ies'} via du, ${fallbackPaths.length} via walker fallback`,
+  )
+  if (fallbackPaths.length > 0) {
+    const duBytes = bytesSoFar
+    const duCount = measures.size
+    const walked = await measureEntries(fallbackPaths, permIssues, {
+      concurrency: 4,
+      onProgress: (progress) => {
+        progressLine(
+          `⠋ measuring ${duCount + progress.measuredEntries}/${entryCount} folders · ${formatBytes(duBytes + progress.bytesSoFar)}`,
+        )
+      },
+    })
+    for (const [entryPath, measure] of walked) measures.set(entryPath, measure)
+  }
+  return measures
 }
 
 /**

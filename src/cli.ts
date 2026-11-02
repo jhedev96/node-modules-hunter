@@ -32,6 +32,7 @@ cli.option('-y, --yes', 'Answer yes to every prompt')
 cli.option('-f, --force', 'Skip all confirmations (implies --yes)')
 cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N lands later")
 cli.option('--stale <days>', 'v1.1: only projects idle >= <days> (git activity signal — last commit, else manifest, else folder mtime)')
+cli.option('--fast-size', 'v1.1: measure with one `du -sk` per entry (KiB granularity) instead of walking every file')
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
@@ -221,6 +222,9 @@ async function main(): Promise<number> {
     stale = days
   }
 
+  // --fast-size (v1.1): plain boolean — duplicated flags are tolerated like --json/--recursive
+  const fastSize = flags.fastSize === true || (Array.isArray(flags.fastSize) && flags.fastSize.includes(true))
+
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
@@ -353,6 +357,7 @@ async function main(): Promise<number> {
     expand,
     saveReport: reportPath ?? undefined,
     stale,
+    fastSize,
   }
 
   if (subcommand === 'version') {
