@@ -28,6 +28,8 @@ export interface DeleteFlowRequest {
   keep?: string[]
   /** --pm filter: families and/or 'vp'. */
   pmFilter?: string[]
+  /** --stale <days> (v1.1): only projects idle >= N days (git activity signal) become victims. */
+  stale?: number
   /**
    * abort (default): any guarded target aborts the whole run (exit 3).
    * filter: garbage-collector semantics (clean/wizard) — skip guarded, warn, continue.
@@ -87,6 +89,7 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
     excludes: request.excludes,
     keep: request.keep,
     pmFilter: request.pmFilter,
+    stale: request.stale,
   })
 
   // Unresolvable user targets are an explicit guard case (PRD §6.3 symlink loops first-class).

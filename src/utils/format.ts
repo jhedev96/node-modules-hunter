@@ -11,6 +11,13 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`
 }
 
+/** Idle days for the scan IDLE column (v1.1): now / 3d / 90d / 2,190d — '—' without a signal. */
+export function formatIdle(days: number | undefined): string {
+  if (days === undefined) return '—'
+  if (days === 0) return 'now'
+  return `${days.toLocaleString('en-US')}d`
+}
+
 /** Compact relative time for table output: now / 5m ago / 2h ago / 3d ago / 7mo ago / 2y ago. */
 export function formatAge(mtimeMs: number | null, now = Date.now()): string {
   if (mtimeMs == null) return '—'

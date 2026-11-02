@@ -2,7 +2,7 @@ import Table from 'cli-table3'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
-import { formatBytes, formatAge, formatCo2, formatDuration } from '../utils/format.ts'
+import { formatBytes, formatAge, formatCo2, formatDuration, formatIdle } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
 import type {
@@ -69,12 +69,15 @@ export function renderScanResult(result: ScanCommandResult, options: RenderScanO
 }
 
 function renderScanTable(result: ScanCommandResult, options: RenderScanOptions): string {
+  // v1.1: the Idle column appears only when activity data exists (--stale/--sort idle)
+  const showIdle = result.entries.some((entry) => entry.idleDays !== undefined)
   const table = new Table({
     head: [
       colors.dim('Path'),
       colors.dim('Size'),
       colors.dim('Pkgs'),
       colors.dim('PM'),
+      ...(showIdle ? [colors.dim('Idle')] : []),
       colors.dim('Modified'),
     ],
     style: { head: [], border: colorEnabled() ? ['gray'] : [] },
@@ -90,6 +93,7 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
       formatBytes(entry.size),
       entry.packageCount > 0 ? String(entry.packageCount) : '0',
       pmLabel(entry.pm),
+      ...(showIdle ? [formatIdle(entry.idleDays)] : []),
       formatAge(entry.mtimeMs),
     ])
   }
@@ -137,6 +141,10 @@ export function renderScanJson(result: ScanCommandResult): string {
       pmProjectRoot: entry.pm.projectRoot,
       nested: entry.nested === true,
       ownerPath: entry.ownerPath ?? entry.path,
+      // v1.1 additive — keys appear only when --stale/--sort idle ran (frozen-contract friendly)
+      ...(entry.idleDays !== undefined
+        ? { idleDays: entry.idleDays, activitySource: entry.activitySource }
+        : {}),
       modifiedAt: entry.mtimeMs == null ? null : new Date(entry.mtimeMs).toISOString(),
     })),
   }

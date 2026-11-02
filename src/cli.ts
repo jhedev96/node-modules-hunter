@@ -31,6 +31,7 @@ cli.option('--dry-run', 'Preview what would be deleted — nothing is touched')
 cli.option('-y, --yes', 'Answer yes to every prompt')
 cli.option('-f, --force', 'Skip all confirmations (implies --yes)')
 cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N lands later")
+cli.option('--stale <days>', 'v1.1: only projects idle >= <days> (git activity signal — last commit, else manifest, else folder mtime)')
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
@@ -201,6 +202,25 @@ async function main(): Promise<number> {
     return 1
   }
 
+  // --stale (v1.1): whole days; guards mirror the sibling --size family (loud, exit 1)
+  let stale: number | undefined
+  if (flags.stale !== undefined) {
+    if (flags.stale === true) {
+      errorLog('--stale needs a value — use --stale=<days> (e.g. --stale=90)')
+      return 1
+    }
+    if (Array.isArray(flags.stale)) {
+      errorLog('--stale given more than once — pass a single value (days)')
+      return 1
+    }
+    const days = Number(flags.stale)
+    if (!Number.isInteger(days) || days < 1 || days > 365_000) {
+      errorLog(`invalid --stale: ${String(flags.stale)} (expected a positive whole number of days)`)
+      return 1
+    }
+    stale = days
+  }
+
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
@@ -332,6 +352,7 @@ async function main(): Promise<number> {
     listPm: pm.given && pm.family === null,
     expand,
     saveReport: reportPath ?? undefined,
+    stale,
   }
 
   if (subcommand === 'version') {
@@ -638,6 +659,7 @@ async function main(): Promise<number> {
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       maxDepth: effectiveDepth,
+      stale,
     })
   }
 
@@ -655,6 +677,7 @@ async function main(): Promise<number> {
       keep: keep.length > 0 ? keep : undefined,
       pmFilter: pm.family !== null ? [pm.family] : undefined,
       maxDepth: effectiveDepth,
+      stale,
     })
   }
 

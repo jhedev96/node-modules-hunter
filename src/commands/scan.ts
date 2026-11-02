@@ -7,6 +7,7 @@ import { resolveRoots } from '../utils/paths.ts'
 import { makeGlobMatcher } from '../utils/match.ts'
 import { scanForNodeModules, type WalkEntry } from '../core/walker.ts'
 import { measureEntries } from '../core/sizer.ts'
+import { computeActivity, type Activity } from '../core/activity.ts'
 import { createPmDetector } from '../core/pm-detect.ts'
 import { projectNameFor } from '../core/packages.ts'
 import { insideRoot, SELF_TOKEN } from '../core/guards.ts'
@@ -33,6 +34,8 @@ export interface ScanRequest {
   listPm?: boolean
   /** --expand: show full absolute paths instead of shortened ones. */
   expand?: boolean
+  /** --stale <days>: keep only entries whose project was idle >= <days> (v1.1 git activity signal). */
+  stale?: number
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -120,10 +123,37 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   const pmResults = await Promise.all(entryPaths.map((entryPath) => pmLimiter(() => detect(entryPath))))
   verboseLog(`scan finished in ${Date.now() - started} ms`)
 
+  // --stale (v1.1): the git-activity signal costs one bounded git spawn per project —
+  // only computed when asked, keyed by the entry's own dir (nested entries climb to the
+  // same repo root as their owner, so the cache collapses the shared cost for free).
+  const activityByPath = new Map<string, Activity>()
+  if (request.stale !== undefined) {
+    const activityLimiter = createLimiter(8)
+    const cache = new Map<string, Promise<Activity | null>>()
+    const activityFor = (entryPath: string): Promise<Activity | null> => {
+      const startDir = path.dirname(entryPath)
+      let pending = cache.get(startDir)
+      if (pending === undefined) {
+        pending = computeActivity(entryPath)
+        cache.set(startDir, pending)
+      }
+      return pending
+    }
+    await Promise.all(
+      entryPaths.map((entryPath) =>
+        activityLimiter(async () => {
+          const activity = await activityFor(entryPath)
+          if (activity !== null) activityByPath.set(entryPath, activity)
+        }),
+      ),
+    )
+  }
+
   const cwd = request.cwd
   let entries: ScanEntry[] = entryPaths.map((entryPath, index) => {
     const measure = measures.get(entryPath) ?? { size: 0, packageCount: 0, mtimeMs: null }
     const meta = metaByPath.get(entryPath)
+    const activity = activityByPath.get(entryPath)
     return {
       path: entryPath,
       displayPath: shortenPath(entryPath, cwd),
@@ -131,6 +161,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
       packageCount: measure.packageCount,
       pm: pmResults[index],
       mtimeMs: measure.mtimeMs,
+      ...(activity !== undefined ? { idleDays: activity.idleDays, activitySource: activity.source } : {}),
       nested: meta?.nested,
       ownerPath: meta?.ownerPath,
     }
@@ -188,13 +219,20 @@ async function applyFilters(entries: ScanEntry[], request: ScanRequest): Promise
   const selfGuard = (request.excludes?.includes(SELF_TOKEN) ?? false) || (request.keep?.includes(SELF_TOKEN) ?? false)
   const guardRoot = selfGuard ? path.resolve(request.cwd) : null
 
-  if (!wantsPm && !keepMatcher && !excludeMatcher && !selfGuard) return entries
+  // v1.1 --stale: entries without a readable activity signal are dropped too —
+  // "cannot prove it's stale" is not a survivor in a stale-hunting run.
+  const wantsStale = request.stale !== undefined
+  const isStale = (entry: ScanEntry): boolean =>
+    wantsStale && entry.idleDays !== undefined && entry.idleDays >= (request.stale ?? 0)
+
+  if (!wantsPm && !keepMatcher && !excludeMatcher && !selfGuard && !wantsStale) return entries
 
   const survivingTops = new Set<string>()
   for (const entry of entries) {
     if (entry.nested) continue
     if (guardRoot !== null && insideRoot(entry.path, guardRoot)) continue
     if (wantsPm && !matchPm(entry)) continue
+    if (wantsStale && !isStale(entry)) continue
     if (excludeMatcher && excludeMatcher(entry.path)) continue
     if (keepMatcher) {
       const name = await projectNameFor(entry.path)

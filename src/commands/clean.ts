@@ -13,6 +13,8 @@ export interface CleanRequest {
   excludes?: string[]
   keep?: string[]
   pmFilter?: string[]
+  /** --stale <days> (v1.1): only projects idle >= N days. */
+  stale?: number
   maxDepth?: number
 }
 
@@ -32,6 +34,7 @@ export async function runClean(request: CleanRequest): Promise<number> {
     excludes: request.excludes,
     keep: request.keep,
     pmFilter: request.pmFilter,
+    stale: request.stale,
     maxDepth: request.maxDepth,
     blockedMode: 'filter',
   })

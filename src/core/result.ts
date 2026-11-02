@@ -25,6 +25,11 @@ export interface ScanEntry {
   packageCount: number
   pm: PMInfo
   mtimeMs: number | null
+  /** v1.1 additive: idle days from the freshest activity signal — present only when
+   *  `--stale` (or `--sort idle`) was asked, so frozen v1.0 payloads stay byte-stable. */
+  idleDays?: number
+  /** Which signal produced idleDays (git commit time / package.json mtime / folder mtime). */
+  activitySource?: 'git' | 'manifest' | 'mtime'
   /** True when discovered via -r INSIDE another entry; shown flagged, excluded from totals. */
   nested?: boolean
   /** Top-level owner entry (== path for top entries). */
