@@ -68,13 +68,26 @@ export function renderScanResult(result: ScanCommandResult, options: RenderScanO
   return renderScanTable(result, options)
 }
 
+/** Width of the v1.1 Share bar, in cells — proportion of the largest entry. */
+const BAR_CELLS = 12
+
+function renderBar(size: number, max: number): string {
+  if (max <= 0 || size <= 0) return colors.dim('·')
+  const cells = Math.max(1, Math.round((size / max) * BAR_CELLS))
+  return colors.cyan('█'.repeat(Math.min(cells, BAR_CELLS)))
+}
+
 function renderScanTable(result: ScanCommandResult, options: RenderScanOptions): string {
   // v1.1: the Idle column appears only when activity data exists (--stale/--sort idle)
   const showIdle = result.entries.some((entry) => entry.idleDays !== undefined)
+  // v1.1: Share bar scales against the largest entry; nested rows don't compete
+  // (their bytes already belong to the owner's total)
+  const maxSize = result.entries.reduce((max, entry) => (entry.nested === true ? max : Math.max(max, entry.size)), 0)
   const table = new Table({
     head: [
       colors.dim('Path'),
       colors.dim('Size'),
+      colors.dim('Share'),
       colors.dim('Pkgs'),
       colors.dim('PM'),
       ...(showIdle ? [colors.dim('Idle')] : []),
@@ -91,6 +104,7 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
     table.push([
       label,
       formatBytes(entry.size),
+      nested ? colors.dim('·') : renderBar(entry.size, maxSize),
       entry.packageCount > 0 ? String(entry.packageCount) : '0',
       pmLabel(entry.pm),
       ...(showIdle ? [formatIdle(entry.idleDays)] : []),

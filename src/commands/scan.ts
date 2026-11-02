@@ -39,6 +39,8 @@ export interface ScanRequest {
   stale?: number
   /** --fast-size: measure with one `du -sk` per entry (KiB granularity) instead of the file walker. */
   fastSize?: boolean
+  /** --sort: result order. Default 'size' desc — the frozen v1.0 order. */
+  sort?: SortKey
   /** --save-report: ALSO write the printed report to this file (.json/.md/.txt). */
   saveReport?: string
 }
@@ -48,6 +50,9 @@ export interface ScanOutcome {
   code: number
   result: ScanCommandResult
 }
+
+/** v1.1 --sort keys: size (default, desc), path (asc), idle (desc, activity signal), mtime (newest first). */
+export type SortKey = 'size' | 'path' | 'idle' | 'mtime'
 
 /**
  * Core scan: expand targets → walk → measure → detect PM → filters → sort.
@@ -114,11 +119,11 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   const pmResults = await Promise.all(entryPaths.map((entryPath) => pmLimiter(() => detect(entryPath))))
   verboseLog(`scan finished in ${Date.now() - started} ms`)
 
-  // --stale (v1.1): the git-activity signal costs one bounded git spawn per project —
-  // only computed when asked, keyed by the entry's own dir (nested entries climb to the
-  // same repo root as their owner, so the cache collapses the shared cost for free).
+  // --stale / --sort idle (v1.1): the git-activity signal costs one bounded git spawn per
+  // project — only computed when asked, keyed by the entry's own dir (nested entries climb
+  // to the same repo root as their owner, so the cache collapses the shared cost for free).
   const activityByPath = new Map<string, Activity>()
-  if (request.stale !== undefined) {
+  if (request.stale !== undefined || request.sort === 'idle') {
     const activityLimiter = createLimiter(8)
     const cache = new Map<string, Promise<Activity | null>>()
     const activityFor = (entryPath: string): Promise<Activity | null> => {
@@ -157,7 +162,16 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
       ownerPath: meta?.ownerPath,
     }
   })
-  entries.sort((a, b) => b.size - a.size)
+  // v1.1 --sort: default stays size-desc (the v1.0 order). Ties fall back to a stable,
+  // locale-free path compare; entries without the sorted datum sink to the bottom.
+  const cmpStr = (x: string, y: string): number => (x < y ? -1 : x > y ? 1 : 0)
+  const comparators: Record<SortKey, (a: ScanEntry, b: ScanEntry) => number> = {
+    size: (a, b) => b.size - a.size || cmpStr(a.path, b.path),
+    path: (a, b) => cmpStr(a.path, b.path) || b.size - a.size,
+    idle: (a, b) => (b.idleDays ?? -1) - (a.idleDays ?? -1) || b.size - a.size,
+    mtime: (a, b) => (b.mtimeMs ?? Number.NEGATIVE_INFINITY) - (a.mtimeMs ?? Number.NEGATIVE_INFINITY) || b.size - a.size,
+  }
+  entries.sort(comparators[request.sort ?? 'size'])
 
   entries = await applyFilters(entries, request)
 

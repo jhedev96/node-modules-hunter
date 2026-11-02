@@ -33,6 +33,7 @@ cli.option('-f, --force', 'Skip all confirmations (implies --yes)')
 cli.option("--size <mode>", "'total' (just aggregate) or 'each' (default); numeric top-N lands later")
 cli.option('--stale <days>', 'v1.1: only projects idle >= <days> (git activity signal — last commit, else manifest, else folder mtime)')
 cli.option('--fast-size', 'v1.1: measure with one `du -sk` per entry (KiB granularity) instead of walking every file')
+cli.option('--sort <key>', "v1.1: order results — size (default, desc) | path | idle (oldest project first) | mtime (newest first)")
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
@@ -225,6 +226,25 @@ async function main(): Promise<number> {
   // --fast-size (v1.1): plain boolean — duplicated flags are tolerated like --json/--recursive
   const fastSize = flags.fastSize === true || (Array.isArray(flags.fastSize) && flags.fastSize.includes(true))
 
+  // --sort (v1.1): guards mirror the --size family — bare/multi/unknown are loud, exit 1
+  let sort: 'size' | 'path' | 'idle' | 'mtime' | undefined
+  if (flags.sort !== undefined) {
+    if (flags.sort === true) {
+      errorLog('--sort needs a value — use --sort=size | path | idle | mtime')
+      return 1
+    }
+    if (Array.isArray(flags.sort)) {
+      errorLog('--sort given more than once — pass a single key')
+      return 1
+    }
+    const key = String(flags.sort)
+    if (key !== 'size' && key !== 'path' && key !== 'idle' && key !== 'mtime') {
+      errorLog(`invalid --sort: ${key} (expected size | path | idle | mtime)`)
+      return 1
+    }
+    sort = key
+  }
+
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
@@ -358,6 +378,7 @@ async function main(): Promise<number> {
     saveReport: reportPath ?? undefined,
     stale,
     fastSize,
+    sort,
   }
 
   if (subcommand === 'version') {
