@@ -414,6 +414,8 @@ export interface DeleteOutcomeRow {
   /** 'deleted' (hard) | 'trashed' | 'failed' | 'blocked' */
   status: 'deleted' | 'trashed' | 'failed' | 'blocked'
   error?: string
+  /** v1.1 additive (trash mode only): which trash took the folder — 'system' | 'nmh'. */
+  backend?: 'system' | 'nmh'
 }
 
 export interface DeleteOutcome {
@@ -422,4 +424,8 @@ export interface DeleteOutcome {
   deleted: number
   failed: number
   permissionDenied: boolean
+  /** v1.1 additive (trash mode): nmh-internal trash batch dir when the nmh trash was used. */
+  trashBatch?: string
+  /** v1.1 additive (trash mode): true when --trash=system fell back to the nmh trash. */
+  trashFallback?: boolean
 }

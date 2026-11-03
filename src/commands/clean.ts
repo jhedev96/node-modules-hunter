@@ -15,6 +15,8 @@ export interface CleanRequest {
   pmFilter?: string[]
   /** --stale <days> (v1.1): only projects idle >= N days. */
   stale?: number
+  /** --trash=system|nmh (v1.1): which trash takes victims. Default: system. */
+  trashMode?: 'system' | 'nmh'
   /** --no-skip (v1.1): don't hide .Trash*, Library/, and *.app dirs. Default: skip. */
   skipSystem?: boolean
   maxDepth?: number
@@ -38,6 +40,7 @@ export async function runClean(request: CleanRequest): Promise<number> {
     pmFilter: request.pmFilter,
     stale: request.stale,
     skipSystem: request.skipSystem,
+    trashMode: request.trashMode,
     maxDepth: request.maxDepth,
     blockedMode: 'filter',
   })

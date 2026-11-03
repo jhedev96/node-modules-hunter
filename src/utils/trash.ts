@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { homedir } from 'node:os'
 
 const execFileAsync = promisify(execFile)
 
@@ -11,6 +14,18 @@ const execFileAsync = promisify(execFile)
 export type TrashBackend = 'windows-com' | 'macos-finder' | 'linux-gio' | 'linux-trash-cli' | 'none'
 
 export async function trashBackend(): Promise<TrashBackend> {
+  // Test/MCI escape hatch (the NMH_REGISTRY_JSON family): force a backend decision instead
+  // of discovery — 'none' lets tests exercise the nmh-trash fallback without an exotic box.
+  const forced = process.env.NMH_TRASH_BACKEND
+  if (
+    forced === 'windows-com' ||
+    forced === 'macos-finder' ||
+    forced === 'linux-gio' ||
+    forced === 'linux-trash-cli' ||
+    forced === 'none'
+  ) {
+    return forced
+  }
   switch (process.platform) {
     case 'win32':
       return 'windows-com'
@@ -100,4 +115,52 @@ async function commandExists(bin: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+/**
+ * v1.1 nmh-internal trash: one batch dir per run under `~/.nmh/trash/`, each victim
+ * stored as `<parent>-node_modules-<hex3>` to survive same-name collisions, and a
+ * `manifest.jsonl` row per moved folder recording the original path for restore.
+ * Everything lives under the user's HOME — restorable by moving folders back.
+ */
+export async function createTrashBatch(home?: string): Promise<string> {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const hex = Math.random().toString(16).slice(2, 5)
+  const batchDir = path.join(home ?? homedir(), '.nmh', 'trash', `trash-${stamp}-${hex}`)
+  await fs.mkdir(batchDir, { recursive: true })
+  return batchDir
+}
+
+/** Move one folder into the batch dir; returns the name it was stored under. */
+export async function nmhTrashMove(entryPath: string, batchDir: string): Promise<string> {
+  const parent = path.basename(path.dirname(entryPath))
+  const storedAs = `${parent}-node_modules-${Math.random().toString(16).slice(2, 5)}`
+  const destination = path.join(batchDir, storedAs)
+  try {
+    // rename first: instant on the same device, never follows symlinks
+    await fs.rename(entryPath, destination)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'EXDEV') throw err
+    // cross-device: copy WITHOUT dereferencing symlinks (the never-follow rule), then remove
+    await fs.cp(entryPath, destination, { recursive: true, dereference: false, verbatimSymlinks: true })
+    await fs.rm(entryPath, { recursive: true, force: true })
+  }
+  return storedAs
+}
+
+export interface TrashManifestRow {
+  originalPath: string
+  storedAs: string
+  size: number
+  trashedAt: string
+  nmh: string
+  via: 'explicit' | 'fallback'
+}
+
+/** Append one restore record to the batch manifest (JSONL — one object per line). */
+export async function appendTrashManifest(
+  batchDir: string,
+  row: TrashManifestRow,
+): Promise<void> {
+  await fs.appendFile(path.join(batchDir, 'manifest.jsonl'), `${JSON.stringify(row)}\n`, 'utf8')
 }

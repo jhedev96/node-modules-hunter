@@ -230,7 +230,12 @@ export function renderDeleteJson(
       size: row.size,
       sizeFormatted: formatBytes(row.size),
       error: row.error ?? null,
+      // v1.1 additive — trash backend per row, only when trash mode ran
+      ...(row.backend !== undefined ? { backend: row.backend } : {}),
     })),
+    // v1.1 additive — nmh-internal trash batch dir / fallback flag, only when used
+    ...(outcome.trashBatch !== undefined ? { trashBatch: outcome.trashBatch } : {}),
+    ...(outcome.trashFallback === true ? { trashFallback: true } : {}),
   }
   return JSON.stringify(payload, null, 2)
 }

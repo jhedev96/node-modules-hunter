@@ -1,4 +1,5 @@
 import { confirm, select, isCancel } from '@clack/prompts'
+import { note } from '../utils/logger.ts'
 import { collectScan } from './scan.ts'
 import { deleteEntries } from '../core/deleter.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
@@ -30,6 +31,8 @@ export interface DeleteFlowRequest {
   pmFilter?: string[]
   /** --stale <days> (v1.1): only projects idle >= N days (git activity signal) become victims. */
   stale?: number
+  /** --trash=system|nmh (v1.1): which trash takes victims in trash mode. Default: system. */
+  trashMode?: 'system' | 'nmh'
   /** --no-skip (v1.1): don't hide .Trash*, Library/, and *.app dirs while discovering. Default: skip. */
   skipSystem?: boolean
   /**
@@ -44,6 +47,8 @@ export interface ExecuteRequest {
   json: boolean
   /** wizard renders its own outro. */
   quietSummary?: boolean
+  /** --trash=system|nmh (v1.1): which trash takes victims in trash mode. Default: system. */
+  trashMode?: 'system' | 'nmh'
 }
 
 /** Shared executor for delete/clean/wizard: run deletion, render, log to ~/.nmh/logs. */
@@ -53,6 +58,7 @@ export async function executeAll(
 ): Promise<{ code: number; outcome: DeleteOutcome }> {
   const outcome = await deleteEntries(entries, {
     mode: request.mode,
+    trashMode: request.trashMode,
     onRow: (_row: DeleteOutcomeRow, done: number, total: number) => {
       progressLine(`🗑  ${done}/${total} folders…`)
     },
@@ -63,6 +69,15 @@ export async function executeAll(
   else {
     const summary = renderDeleteSummary(outcome, request.mode)
     if (summary) log(summary)
+    // v1.1: when the restorable nmh trash was used, say where it lives and how to undo.
+    // stderr side-channels keep stdout clean for tables; --json carries the same data.
+    if (outcome.trashBatch !== undefined) {
+      if (outcome.trashFallback === true) {
+        note(`no OS trash backend (install gio or trash-cli) — fell back to the restorable nmh trash: ${outcome.trashBatch}`)
+      } else {
+        note(`restorable nmh trash: ${outcome.trashBatch} (manifest: manifest.jsonl — restore by moving folders back)`)
+      }
+    }
   }
 
   await writeDeleteLog({
@@ -71,6 +86,8 @@ export async function executeAll(
     freed: outcome.freed,
     deleted: outcome.deleted,
     failed: outcome.failed,
+    ...(outcome.trashBatch !== undefined ? { trashBatch: outcome.trashBatch } : {}),
+    ...(outcome.trashFallback === true ? { trashFallback: true } : {}),
   })
 
   const code = outcome.permissionDenied ? 4 : outcome.failed > 0 ? 1 : 0
@@ -151,7 +168,7 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
   }
 
   if (request.json) {
-    const { code } = await executeAll(safeEntries, { mode, json: true })
+    const { code } = await executeAll(safeEntries, { mode, json: true, trashMode: request.trashMode })
     return code
   }
 
@@ -168,7 +185,7 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
     }
   }
 
-  const { code } = await executeAll(safeEntries, { mode, json: false })
+  const { code } = await executeAll(safeEntries, { mode, json: false, trashMode: request.trashMode })
   return code
 }
 

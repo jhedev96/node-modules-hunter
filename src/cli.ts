@@ -36,6 +36,7 @@ cli.option('--stale <days>', 'v1.1: only projects idle >= <days> (git activity s
 cli.option('--fast-size', 'v1.1: measure with one `du -sk` per entry (KiB granularity) instead of walking every file')
 cli.option('--sort <key>', "v1.1: order results — size (default, desc) | path | idle (oldest project first) | mtime (newest first)")
 cli.option('--no-skip', 'v1.1: audit everything — stop hiding .Trash*, Library/, and *.app dirs during discovery (default: hidden)')
+cli.option('--trash <mode>', "v1.1: trash mode for delete ops — 'system' (default: gio/Finder/Recycle Bin) or 'nmh' (restorable ~/.nmh/trash + manifest)")
 cli.option('--json', 'Machine-readable JSON output')
 cli.option('-q, --quiet', 'Minimal output — pretty tables/notes mute, but the --json payload still prints')
 cli.option('--verbose', 'Debug chatter on stderr')
@@ -253,6 +254,25 @@ async function main(): Promise<number> {
   // this flag says otherwise (.git stays skipped always — pure cost, zero yield).
   const skipSystem = flags.skip !== false
 
+  // --trash=system|nmh (v1.1): guards mirror the --size / --stale value-flag family.
+  let trashMode: 'system' | 'nmh' | undefined
+  if (flags.trash !== undefined) {
+    if (flags.trash === true) {
+      errorLog('--trash needs a value — use --trash=system or --trash=nmh')
+      return 1
+    }
+    if (Array.isArray(flags.trash)) {
+      errorLog('--trash given more than once — pass a single mode')
+      return 1
+    }
+    const mode = String(flags.trash)
+    if (mode !== 'system' && mode !== 'nmh') {
+      errorLog(`invalid --trash: ${mode} (expected system | nmh)`)
+      return 1
+    }
+    trashMode = mode
+  }
+
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
     errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
@@ -358,6 +378,11 @@ async function main(): Promise<number> {
   if (reportPath !== null && (deleted.given || subcommand === 'clean')) {
     errorLog('--save-report rides along with scan — delete/clean runs are not scan reports')
     return 1
+  }
+
+  // --trash (v1.1) is a delete-op knob — harmless elsewhere, but say so
+  if (trashMode !== undefined && !deleted.given && subcommand !== 'clean') {
+    warn('--trash only matters for delete/clean runs — ignored for scans and read-only commands')
   }
 
   // v0.9.4: a delete op aimed at the filesystem root is always a mistake — the scan would
@@ -706,11 +731,16 @@ async function main(): Promise<number> {
       maxDepth: effectiveDepth,
       stale,
       skipSystem,
+      trashMode,
     })
   }
 
   if (deleted.given) {
     // `nmh --dir=… --delete=hard` with NO command is the one-liner (PRD §1) — targets default to cwd.
+    if (trashMode !== undefined && deleted.mode === 'hard') {
+      errorLog("--trash applies to trash mode — hard delete is permanent by design, there is no trash to choose")
+      return 1
+    }
     return runDelete({
       targets,
       cwd,
@@ -725,6 +755,7 @@ async function main(): Promise<number> {
       maxDepth: effectiveDepth,
       stale,
       skipSystem,
+      trashMode,
     })
   }
 

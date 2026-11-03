@@ -20,6 +20,10 @@ export interface DeleteLogPayload {
   freed: number
   deleted: number
   failed: number
+  /** v1.1 additive: nmh-internal trash batch dir when the nmh trash was used. */
+  trashBatch?: string
+  /** v1.1 additive: --trash=system fell back to the nmh trash. */
+  trashFallback?: boolean
 }
 
 /**
@@ -41,7 +45,12 @@ export async function writeDeleteLog(payload: DeleteLogPayload): Promise<string 
         path: row.path,
         status: row.status,
         error: row.error ?? null,
+        // v1.1 additive: which trash took it (system | nmh) — trash rows only
+        ...(row.backend !== undefined ? { backend: row.backend } : {}),
       })),
+      // v1.1 additive: nmh-trash batch dir / fallback marker when applicable
+      ...(payload.trashBatch !== undefined ? { trashBatch: payload.trashBatch } : {}),
+      ...(payload.trashFallback === true ? { trashFallback: true } : {}),
     }
     await fs.writeFile(file, JSON.stringify(body, null, 2))
     return file

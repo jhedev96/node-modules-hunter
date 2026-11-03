@@ -59,7 +59,7 @@ async function latestVersion(): Promise<string | null> {
       return null
     }
   }
-  const view = await runNpm(['view', 'node-modules-hunter', 'version'], 30_000)
+  const view = await runNpm(['view', 'node-modules-hunter', 'version'], 60_000)
   if (view.code !== 0) {
     verboseLog(`npm view failed (rc ${view.code}): ${view.stderr.trim().slice(0, 200)}`)
     return null
@@ -70,7 +70,12 @@ async function latestVersion(): Promise<string | null> {
 
 /** True when this package is installed as an npm global (per the user's npm prefix). */
 async function isNpmGlobal(): Promise<boolean> {
-  const ls = await runNpm(['ls', '-g', 'node-modules-hunter', '--depth=0'], 20_000)
+  // Test/MCI seam (the NMH-* escape-hatch family): '1' = global, '0' = not — skips the
+  // npm spawn entirely so update tests stay hermetic on slow, parallel-loaded machines.
+  const forced = process.env.NMH_UPDATE_GLOBAL
+  if (forced === '1') return true
+  if (forced === '0') return false
+  const ls = await runNpm(['ls', '-g', 'node-modules-hunter', '--depth=0'], 60_000)
   return ls.code === 0 && ls.stdout.includes('node-modules-hunter')
 }
 
