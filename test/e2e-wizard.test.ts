@@ -17,7 +17,7 @@ describe('wizard e2e (no args, spawned CLI, non-TTY)', () => {
       const run = await runCli([], { cwd: fx.root })
       expect(run.code).toBe(0)
       expect(run.stdout).toContain('node-modules-hunter v')
-      expect(run.stdout).toContain('app/node_modules')
+      expect(run.stdout).toContain(path.join('app', 'node_modules'))
       expect(run.stderr).toContain('needs a TTY')
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
@@ -69,7 +69,8 @@ describe('wizard e2e (no args, spawned CLI, non-TTY)', () => {
       expect(run.code).toBe(0)
       const payload = JSON.parse(run.stdout) as ScanPayload
       expect(payload.totals.folders).toBe(1)
-      expect(run.stdout).toContain('proj/node_modules')
+      // payload paths are JSON-escaped (Windows doubles backslashes) — assert via the model
+      expect(payload.entries[0]?.path).toContain(path.join('proj', 'node_modules'))
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }
@@ -90,7 +91,8 @@ describe('wizard e2e (no args, spawned CLI, non-TTY)', () => {
       expect(run.code).toBe(0)
       const payload = JSON.parse(run.stdout) as ScanPayload
       expect(payload.totals.folders).toBe(1)
-      expect(run.stdout).toContain('wsk/node_modules')
+      // payload paths are JSON-escaped (Windows doubles backslashes) — assert via the model
+      expect(payload.entries[0]?.path).toContain(path.join('wsk', 'node_modules'))
     } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runCli, tmpRoot } from './helpers.ts'
+import { trashBackend } from '../src/utils/trash.ts'
 
 interface DeletePayload {
   deleted: number
@@ -76,6 +77,9 @@ describe('trash backends (v1.1) — --trash=system|nmh + restorable fallback', (
   })
 
   it('--trash=system with a working gio backend keeps the v1.0 path (no nmh batch)', async () => {
+    // Meaningful only where gio actually exists (it is forced, but the CLI must
+    // be able to run it): the natural detection gates the branch per platform.
+    if (await trashBackend() !== 'linux-gio') return
     const root = await tmpRoot('trash-system')
     try {
       const entry = await victim(root)
