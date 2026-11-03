@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import { toolVersion } from '../utils/version.ts'
 import { isNewer } from '../utils/update-check.ts'
-import { errorLog, log, note, payload, progressLine, clearProgress, verboseLog } from '../utils/logger.ts'
+import { errorLog, log, note, payload, spinUpdate, spinClear, verboseLog } from '../utils/logger.ts'
 
 const execFileP = promisify(execFile)
 
@@ -95,9 +95,9 @@ async function installLatest(version: string): Promise<{ ok: boolean; detail: st
       return { ok: false, detail: err instanceof Error ? err.message : String(err) }
     }
   }
-  progressLine('⠋ updating via npm…')
+  spinUpdate('updating via npm…')
   const install = await runNpm(['install', '-g', 'node-modules-hunter@' + version], 300_000)
-  clearProgress()
+  spinClear()
   if (install.code !== 0) {
     return { ok: false, detail: install.stderr.trim().slice(0, 300) || `npm exited ${install.code}` }
   }

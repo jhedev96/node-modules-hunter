@@ -5,7 +5,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { expandTilde } from '../utils/paths.ts'
 import { createLimiter } from '../utils/limit.ts'
-import { progressLine, clearProgress, warn, verboseLog, log, payload } from '../utils/logger.ts'
+import { spinUpdate, spinClear, warn, verboseLog, log, payload } from '../utils/logger.ts'
 import { readPackageJson, listTopLevelPackages, packageVersion } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderGlobalJson, renderGlobalReport } from '../core/render.ts'
@@ -154,7 +154,7 @@ async function pnpmFallbackSpec(): Promise<RootSpec | null> {
 }
 
 export async function runGlobal(request: GlobalRequest): Promise<number> {
-  progressLine('⠋ probing global prefixes…')
+  spinUpdate('probing global prefixes…')
 
   const pmRoots = await resolvePmRoots(request.pmFilter)
   const reports: GlobalPmReport[] = []
@@ -172,7 +172,7 @@ export async function runGlobal(request: GlobalRequest): Promise<number> {
             ref.symlinked ? Promise.resolve(null) : measureEntry(ref.path),
           ])
           done += 1
-          progressLine(`⠋ global ${pm} — ${done}/${refs.length} packages`)
+          spinUpdate(`global ${pm} — ${done}/${refs.length} packages`)
           return { name: ref.name, version, symlinked: ref.symlinked, size: measure === null ? null : measure.size }
         }),
       ),
@@ -188,7 +188,7 @@ export async function runGlobal(request: GlobalRequest): Promise<number> {
       dead,
     })
   }
-  clearProgress()
+  spinClear()
 
   // cross-PM duplication: same package name installed globally under >1 PM (PRD §8.4)
   const byName = new Map<string, Map<string, number>>() // name → pm → size

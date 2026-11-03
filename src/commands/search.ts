@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
+import { log, spinUpdate, spinClear, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { makeSearchMatcher } from '../utils/match.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion } from '../core/packages.ts'
@@ -73,12 +73,12 @@ export async function collectSearch(request: SearchRequest): Promise<SearchOutco
           ),
         )
         searched += 1
-        progressLine(`⠋ searching ${searched}/${entryCount} node_modules…`)
+        spinUpdate(`searching ${searched}/${entryCount} node_modules…`)
         return { entry, pathMatch, matches }
       }),
     ),
   )
-  clearProgress()
+  spinClear()
 
   const results = outcomes.filter((outcome) => outcome.pathMatch || outcome.matches.length > 0)
   verboseLog(`search '${request.pattern}': ${results.length}/${entryCount} entries matched`)

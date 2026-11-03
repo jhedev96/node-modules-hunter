@@ -1,5 +1,5 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
+import { log, spinUpdate, spinClear, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { collectScan } from './scan.ts'
 import { listTopLevelPackages, packageVersion, projectDepsFor, projectNameFor } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
@@ -81,12 +81,12 @@ export async function collectMap(request: MapRequest): Promise<MapOutcome> {
           ),
         )
         mapped += 1
-        progressLine(`⠋ mapping ${mapped}/${entryCount} projects…`)
+        spinUpdate(`mapping ${mapped}/${entryCount} projects…`)
         return { entry, project, topPackages, declared }
       }),
     ),
   )
-  clearProgress()
+  spinClear()
 
   let code = 0
   if (projects.length === 0) code = 2

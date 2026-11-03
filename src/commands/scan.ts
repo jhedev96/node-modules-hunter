@@ -1,6 +1,6 @@
 import path, { basename } from 'node:path'
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note, payload } from '../utils/logger.ts'
+import { log, spinUpdate, spinClear, warn, verboseLog, note, payload } from '../utils/logger.ts'
 import { formatBytes, stripAnsi } from '../utils/format.ts'
 import { writeReportSnapshot } from '../utils/report.ts'
 import { resolveRoots } from '../utils/paths.ts'
@@ -116,7 +116,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   verboseLog(`found ${entryPaths.length} node_modules — measuring`)
 
   const measures = await collectMeasures(entryPaths, request.fastSize === true, permIssues)
-  clearProgress()
+  spinClear()
 
   const detect = createPmDetector()
   const pmLimiter = createLimiter(8)
@@ -220,7 +220,7 @@ async function collectMeasures(
   let measuredCount = 0
   let bytesSoFar = 0
   const bump = (): void => {
-    progressLine(`⠋ measuring ${measuredCount}/${entryCount} folders · ${formatBytes(bytesSoFar)}`)
+    spinUpdate(`measuring ${measuredCount}/${entryCount} folders · ${formatBytes(bytesSoFar)}`)
   }
   if (!fastSize) {
     return measureEntries(entryPaths, permIssues, {
@@ -260,8 +260,8 @@ async function collectMeasures(
     const walked = await measureEntries(fallbackPaths, permIssues, {
       concurrency: 4,
       onProgress: (progress) => {
-        progressLine(
-          `⠋ measuring ${duCount + progress.measuredEntries}/${entryCount} folders · ${formatBytes(duBytes + progress.bytesSoFar)}`,
+        spinUpdate(
+          `measuring ${duCount + progress.measuredEntries}/${entryCount} folders · ${formatBytes(duBytes + progress.bytesSoFar)}`,
         )
       },
     })

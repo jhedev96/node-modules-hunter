@@ -1,5 +1,5 @@
 import { createLimiter } from '../utils/limit.ts'
-import { log, progressLine, clearProgress, warn, verboseLog, note, errorLog, payload } from '../utils/logger.ts'
+import { log, spinUpdate, spinClear, warn, verboseLog, note, errorLog, payload } from '../utils/logger.ts'
 import { writeReportSnapshot } from '../utils/report.ts'
 import { stripAnsi, formatBytes } from '../utils/format.ts'
 import {
@@ -116,7 +116,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
           ),
         )
         measuredEntries += 1
-        progressLine(`⠋ analyzing ${measuredEntries}/${entryCount} node_modules…`)
+        spinUpdate(`analyzing ${measuredEntries}/${entryCount} node_modules…`)
         const graph = request.graph === true
           ? await readProjectLockGraph(declared?.projectDir ?? path.dirname(entry.path))
           : undefined
@@ -124,7 +124,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
       }),
     ),
   )
-  clearProgress()
+  spinClear()
 
   // Group by NAME across all scanned entries for the size ranking, then split
   // each name group by exact version to estimate dedup-able waste.

@@ -5,7 +5,7 @@ import { deleteEntries } from '../core/deleter.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
 import { renderDeleteJson, renderDeleteSummary, renderPlan, shortenPath } from '../core/render.ts'
 import { writeDeleteLog } from '../utils/delete-log.ts'
-import { clearProgress, errorLog, isSilent, isTTYOut, log, progressLine, warn, payload } from '../utils/logger.ts'
+import { spinUpdate, spinClear, errorLog, isSilent, isTTYOut, log, warn, payload } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { DeleteMode, DeleteOutcome, DeleteOutcomeRow, ScanEntry } from '../core/result.ts'
@@ -60,10 +60,10 @@ export async function executeAll(
     mode: request.mode,
     trashMode: request.trashMode,
     onRow: (_row: DeleteOutcomeRow, done: number, total: number) => {
-      progressLine(`🗑  ${done}/${total} folders…`)
+      spinUpdate(`🗑  ${done}/${total} folders…`)
     },
   })
-  clearProgress()
+  spinClear()
 
   if (request.json) payload(renderDeleteJson(outcome, request.mode, false))
   else {

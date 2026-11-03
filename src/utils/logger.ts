@@ -119,14 +119,51 @@ function progressAllowed(): boolean {
   return state.isTTY // 'auto'
 }
 
-/** In-place progress line (per progress mode; never in quiet mode). */
-export function progressLine(message: string): void {
-  if (state.quiet || !progressAllowed()) return
-  process.stdout.write(CLEAR_LINE + colors.dim(message))
+// ── time-driven spinner ─────────────────────────────────────────────────────
+// A loader must rotate on its own clock (70 ms/braille step), not on scan
+// progress — a frozen percentage must NOT look like a hung scan. When the
+// rotation is muted (non-TTY with `--animate on`), the last-known message
+// still paints once per update, like the old static line.
+const SPIN_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+const SPIN_MS = 70
+
+let spinTimer: NodeJS.Timeout | null = null
+let spinFrame = 0
+let spinMsg = ''
+
+function spinPaint(): void {
+  process.stdout.write(CLEAR_LINE + colors.dim(`${SPIN_FRAMES[spinFrame]} ${spinMsg}`))
 }
 
-/** Clear the in-place progress line. */
-export function clearProgress(): void {
+function startSpin(): void {
+  spinFrame = 0
+  spinPaint()
+  const timer = setInterval(() => {
+    spinFrame = (spinFrame + 1) % SPIN_FRAMES.length
+    spinPaint()
+  }, SPIN_MS)
+  spinTimer = timer
+  if (typeof timer.unref === 'function') timer.unref() // never hold the process open
+}
+
+/** Rotating loader: first call spins up the clock, later calls refresh the label. */
+export function spinUpdate(message: string): void {
+  spinMsg = message
+  if (state.quiet || !progressAllowed() || spinTimer !== null) return
+  if (!state.isTTY) {
+    // forced pipe mode: no timer flood — one paint per update, like a static line
+    spinPaint()
+    return
+  }
+  startSpin()
+}
+
+/** Stop the rotation and clear the in-place line. */
+export function spinClear(): void {
+  if (spinTimer !== null) {
+    clearInterval(spinTimer)
+    spinTimer = null
+  }
   if (state.quiet || !progressAllowed()) return
   process.stdout.write(CLEAR_LINE)
 }
