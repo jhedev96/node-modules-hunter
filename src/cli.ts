@@ -1,5 +1,6 @@
 import { cac } from 'cac'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
 import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
@@ -84,6 +85,12 @@ cli.option('--log-dir <dir>', 'config family: set the persisted recovery-log dir
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
+/** Every dispatchable first-token (PRD §7 commands + analyze/info aliases). */
+const KNOWN_SUBCOMMANDS = new Set([
+  'scan', 'clean', 'search', 'map', 'why', 'treemap', 'stats',
+  'analyze', 'info', 'config', 'update', 'version', 'help',
+])
+
 function looksLikePath(text: string): boolean {
   return (
     text.includes('/') ||
@@ -92,6 +99,29 @@ function looksLikePath(text: string): boolean {
     text.startsWith('~') ||
     /^[A-Za-z]:/.test(text)
   )
+}
+
+/**
+ * Classify the first positional. Order matters:
+ * 1. a registered subcommand always wins — `nmh scan` is the scan command even if a
+ *    `scan/` directory happens to sit in the cwd;
+ * 2. an existing cwd-relative path is a scan target — `nmh node_modules` from inside a
+ *    project must hit the folder itself, not degenerate into a positional-less scan;
+ * 3. path-like strings (absolute, ~/~, ./…, C:\…) are targets wherever they exist now or not
+ *    (the scan reports unmatched patterns with honesty);
+ * 4. anything else is an unknown command — a silent lapse; it used to fall back to a cwd scan.
+ */
+function resolveSubcommand(
+  positionals: string[],
+  cwd: string,
+): { subcommand: string | null; unknown: string | null } {
+  if (positionals.length === 0) return { subcommand: null, unknown: null }
+  const first = positionals[0]
+  if (KNOWN_SUBCOMMANDS.has(first)) return { subcommand: first, unknown: null }
+  if (existsSync(path.resolve(cwd, first)) || looksLikePath(first)) {
+    return { subcommand: null, unknown: null }
+  }
+  return { subcommand: null, unknown: first }
 }
 
 function normalizeDelete(value: unknown): { given: boolean; mode: DeleteMode | null } | 'invalid' {
@@ -378,7 +408,12 @@ async function main(): Promise<number> {
   const dryRun = flags.dryRun === true
   const assumeYes = flags.yes === true || flags.force === true
 
-  const subcommand = positionals[0] === undefined || looksLikePath(positionals[0]) ? null : positionals[0]
+  const resolvedSub = resolveSubcommand(positionals, cwd)
+  if (resolvedSub.unknown !== null) {
+    errorLog(`unknown command '${resolvedSub.unknown}' — run \`nmh help\` for the command list (paths are passed to \`nmh scan\` or \`--dir\`)`)
+    return 1
+  }
+  const subcommand = resolvedSub.subcommand
   const rest = subcommand ? positionals.slice(1) : positionals
   const dirTargets = splitTargets(flags.dir as string | string[] | undefined)
   const targets = [...rest, ...dirTargets]
