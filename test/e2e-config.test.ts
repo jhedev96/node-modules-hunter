@@ -231,4 +231,35 @@ describe('config e2e (.nmhrc lookup, precedence, validation)', () => {
       await fs.rm(root, { recursive: true, force: true })
     }
   })
+
+  it('$HOME/.nmhrc is honored when the cwd sits OUTSIDE the home tree (the fallback lookup)', async () => {
+    // cwd and home are sibling fixture dirs: the cwd → ancestors → / climb never passes
+    // home, so the only way to see the config is the explicit $HOME fallback.
+    const cwd = await tmpRoot('cfg-outside-cwd')
+    const home = await tmpRoot('cfg-outside-home')
+    try {
+      await fs.mkdir(path.join(cwd, 'proj-a', 'node_modules'), { recursive: true })
+      await fs.writeFile(path.join(cwd, 'proj-a', 'node_modules', 'package.json'), '{"name":"a"}')
+      await fs.mkdir(path.join(cwd, 'proj-b', 'node_modules'), { recursive: true })
+      await fs.writeFile(path.join(cwd, 'proj-b', 'node_modules', 'package.json'), '{"name":"b"}')
+      await fs.writeFile(path.join(home, '.nmhrc'), JSON.stringify({ exclude: ['**/proj-a/**'] }))
+
+      // control: cwd-side .nmhrc absent, home-side one must still steer the scan
+      const run = await runCli(['scan', '.', '--json'], { cwd, home })
+      expect(run.code).toBe(0)
+      const payload = JSON.parse(run.stdout) as ScanPayload
+      expect(payload.totals.folders).toBe(1) // proj-a excluded via the $HOME/.nmhrc fallback
+      expect(payload.entries.map((e) => path.basename(path.dirname(e.path)))).toContain('proj-b')
+
+      // and .nmhrc directly in the cwd still wins over the home fallback (nearest first)
+      await fs.writeFile(path.join(cwd, '.nmhrc'), JSON.stringify({ exclude: ['**/proj-b/**'] }))
+      const nearest = await runCli(['scan', '.', '--json'], { cwd, home })
+      const nearestPayload = JSON.parse(nearest.stdout) as ScanPayload
+      expect(nearestPayload.totals.folders).toBe(1)
+      expect(nearestPayload.entries.map((e) => path.basename(path.dirname(e.path)))).toContain('proj-a')
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true })
+      await fs.rm(home, { recursive: true, force: true })
+    }
+  })
 })

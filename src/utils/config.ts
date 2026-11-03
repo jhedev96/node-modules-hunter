@@ -140,5 +140,18 @@ export async function loadConfig(explicitPath: string | null, cwd: string): Prom
     if (current === home || current === path.dirname(current)) break
     current = path.dirname(current)
   }
+  // cwd outside $HOME: the climb never passes the home dir, but a .nmhrc there is still
+  // the documented fallback — config set writes to it, so scans should read it too.
+  const homeChain = cwd === home || cwd.startsWith(home + path.sep)
+  if (!homeChain) {
+    for (const name of FILE_NAMES) {
+      const candidate = path.join(home, name)
+      const body = await readMaybe(candidate)
+      if (body !== null) {
+        verboseLog(`config: found ${candidate}`)
+        return { values: parseConfigBody(body, candidate), source: candidate }
+      }
+    }
+  }
   return { values: {}, source: null }
 }
