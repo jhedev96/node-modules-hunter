@@ -129,9 +129,14 @@ describe('scan filters e2e (spawned CLI, non-TTY)', () => {
       expect(expanded.code).toBe(0)
       expect(expanded.stdout).toContain(fx.paths.webEntry)
 
-      const compact = await runCli(['scan', fx.root])
+      // Shortened rendering depends on the spawn cwd: os.tmpdir() sits inside
+      // $HOME on some dev boxes (Android/Termux) but outside HOME and cwd on CI
+      // runners — so pin the cwd to the fixture root and expect the
+      // deterministic `./web/node_modules` short form.
+      const compact = await runCli(['scan', fx.root], { cwd: fx.root })
       expect(compact.code).toBe(0)
       expect(compact.stdout).not.toContain(fx.paths.webEntry)
+      expect(compact.stdout).toContain('./web/node_modules')
       expect(compact.stdout).toContain('web/node_modules')
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
