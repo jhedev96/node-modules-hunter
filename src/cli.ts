@@ -3,6 +3,7 @@ import path from 'node:path'
 import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
 import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
+import { printHelp } from './utils/help.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
 import { loadConfig, ConfigError } from './utils/config.ts'
 import { setLogDirectory } from './utils/delete-log.ts'
@@ -26,6 +27,8 @@ import type { NmhConfig } from './utils/config.ts'
 
 const cli = cac('nmh')
 
+cli.option('-h, --help', 'Show the full help screen (commands, options, examples)')
+cli.option('-v, --version', 'Show the version banner (tool version, node+abi, OS/arch/kernel — --json for plain fields)')
 cli.option('-d, --dir <paths>', 'Target dir(s), comma separated or repeated; globs and ~ allowed')
 cli.option('--delete [mode]', 'Delete found folders: hard | soft | trash (soft = trash; no value = pick interactively)')
 cli.option('--dry-run', 'Preview what would be deleted — nothing is touched')
@@ -127,7 +130,7 @@ async function main(): Promise<number> {
     return 0
   }
   if (flags.help === true || positionals[0] === 'help') {
-    cli.outputHelp()
+    printHelp()
     return 0
   }
 
