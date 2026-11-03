@@ -39,7 +39,7 @@ describe('report e2e (--save-report / --report)', () => {
       const md = await fs.readFile(path.join(root, 'doc.md'), 'utf8')
       expect(md).not.toMatch(/\x1b\[/)
       expect(md).toContain('Path')
-      expect(md).toContain('a/node_modules')
+      expect(md).toContain(path.join('a', 'node_modules'))
 
       await runCli(['scan', root, '--report', 'plain.txt'], { cwd: root, home: root })
       const txt = await fs.readFile(path.join(root, 'plain.txt'), 'utf8')

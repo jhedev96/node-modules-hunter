@@ -158,7 +158,11 @@ describe('config e2e (.nmhrc lookup, precedence, validation)', () => {
     const root = await depthFixture('cfg-logdir', { depth: 1, logDir: 'logs', defaultMode: 'trash' })
     try {
       const entry = path.join(root, 'proj', 'node_modules')
-      const run = await runCli(['--dir', 'proj', '--delete=trash', '--force'], { cwd: root, home: root })
+      const run = await runCli(['--dir', 'proj', '--delete=trash', '--force'], {
+        cwd: root,
+        home: root,
+        envExtra: { NMH_TRASH_BACKEND: 'none' }, // hermetic: same trash flow on every OS
+      })
       expect(run.code).toBe(0)
       const logs = await fs.readdir(path.join(root, 'logs'))
       expect(logs.some((name) => /^delete-.*\.json$/.test(name))).toBe(true)

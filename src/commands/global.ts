@@ -28,13 +28,33 @@ interface RootSpec {
 }
 
 /** Probe one PM CLI for its global node_modules. Last non-empty stdout line wins. */
+/** Last non-empty stdout line — PM probes print one path per line. */
+function lastLine(stdout: string): string | null {
+  const line = stdout.split('\n').map((row) => row.trim()).filter(Boolean).pop()
+  return line && line.length > 0 ? line : null
+}
+
 async function probeViaCommand(cmd: string, argv: string[]): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(cmd, argv, { timeout: PROBE_TIMEOUT })
-    const line = stdout.split('\n').map((row) => row.trim()).filter(Boolean).pop()
-    return line && line.length > 0 ? line : null
+    return lastLine(stdout)
   } catch (err) {
     verboseLog(`global probe: ${cmd} ${argv.join(' ')} failed (${err instanceof Error ? err.message.split('\n')[0] : String(err)})`)
+  }
+  // Windows pass two: npm/pnpm/yarn ship as .cmd batch shims, which bare execFile
+  // cannot start (a batch needs cmd.exe) — that left `nmh stats -g` finding nothing
+  // on Windows runners/real boxes (exit 2). The shell resolves PATH the way the
+  // user's shell does (also covering .exe tools like bun); args are fixed strings.
+  if (process.platform !== 'win32') return null
+  try {
+    const { stdout } = await execFileAsync(cmd, argv, {
+      timeout: PROBE_TIMEOUT,
+      shell: true,
+      windowsHide: true,
+    })
+    return lastLine(stdout)
+  } catch (err) {
+    verboseLog(`global probe: ${cmd} ${argv.join(' ')} via shell failed (${err instanceof Error ? err.message.split('\n')[0] : String(err)})`)
     return null
   }
 }

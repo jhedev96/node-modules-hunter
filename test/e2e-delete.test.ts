@@ -138,20 +138,22 @@ describe('delete flow e2e (spawned CLI, non-TTY)', () => {
   })
 
   it('clean uses trash by default and filter semantics; empty target → exit 2', async () => {
-    const backend: TrashBackend = await trashBackend()
+    // Hermetic trash: force the restorable nmh fallback so the clean flow asserts
+    // identically on every platform (native Windows Recycle Bin stays a follow-up).
     const fx = await monorepoFixture('clean')
     const empty = await tmpRoot('clean-empty')
     try {
       const emptyRun = await runCli(['clean', fx.paths.outside])
       expect(emptyRun.code).toBe(2)
 
-      if (backend !== 'none') {
-        const run = await runCli(['clean', fx.root, '-y', '--json'])
-        expect(run.code).toBe(0)
-        // every entry was safe here; sizes were measured — folders gone afterwards
-        expect(await exists(fx.paths.webEntry)).toBe(false)
-        expect(await exists(fx.paths.apiEntry)).toBe(false)
-      }
+      const run = await runCli(['clean', fx.root, '-y', '--json'], {
+        home: fx.root,
+        envExtra: { NMH_TRASH_BACKEND: 'none' },
+      })
+      expect(run.code).toBe(0)
+      // every entry was safe here; sizes were measured — folders gone afterwards
+      expect(await exists(fx.paths.webEntry)).toBe(false)
+      expect(await exists(fx.paths.apiEntry)).toBe(false)
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
       await fs.rm(empty, { recursive: true, force: true })

@@ -131,7 +131,13 @@ describe('stale hunting (v1.1) — git activity signal', () => {
       const old = await manifestProject(root, 'old-100', 100)
       await gitProject(root, 'fresh-2', 2)
 
-      const run = await runCli(['--dir', root, '--stale', '97', '--delete=trash', '-y'], { home: root })
+      // Backend forced off hermetically: the delete flow itself (stale filter +
+      // victim segregation) must hold on every platform; the native windows
+      // Recycle-Bin branch is exercised where it is verifiable (see e2e-trash).
+      const run = await runCli(
+        ['--dir', root, '--stale', '97', '--delete=trash', '-y'],
+        { home: root, envExtra: { NMH_TRASH_BACKEND: 'none' } },
+      )
       expect(run.code).toBe(0)
       await expect(fs.access(path.join(old, 'node_modules'))).rejects.toBeTruthy()
       await expect(fs.access(path.join(mid, 'node_modules'))).resolves.toBeUndefined()

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { monorepoFixture, runCli } from './helpers.ts'
 
@@ -160,7 +161,7 @@ describe('search e2e (spawned CLI, non-TTY)', () => {
       expect(run.code).toBe(0)
       expect(run.stdout).toContain('🔍')
       expect(run.stdout).toContain('react@1.0.0')
-      expect(run.stdout).toContain('web/node_modules')
+      expect(run.stdout).toContain(path.join('web', 'node_modules'))
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
     }

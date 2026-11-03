@@ -1,5 +1,6 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import os from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { monorepoFixture, runCli } from './helpers.ts'
 
@@ -48,7 +49,7 @@ describe('scan e2e (spawned CLI, non-TTY)', () => {
   })
 
   it('nothing found → exit 2 with both text and JSON honesty', async () => {
-    const dir = await fs.mkdtemp(path.join(process.env.TMPDIR ?? '/tmp', 'nmh-empty-'))
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'nmh-empty-'))
     try {
       const text = await runCli(['scan', dir])
       expect(text.code).toBe(2)

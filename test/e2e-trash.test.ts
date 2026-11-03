@@ -31,7 +31,7 @@ describe('trash backends (v1.1) — --trash=system|nmh + restorable fallback', (
       const json = JSON.parse(run.stdout) as DeletePayload
       expect(json.deleted).toBe(1)
       expect(json.results[0]?.backend).toBe('nmh')
-      expect(json.trashBatch).toContain('.nmh/trash/trash-')
+      expect(json.trashBatch).toContain(path.join('.nmh', 'trash', 'trash-'))
       expect(json.trashFallback).toBeUndefined()
       await expect(fs.access(entry)).rejects.toBeTruthy()
 
@@ -57,7 +57,7 @@ describe('trash backends (v1.1) — --trash=system|nmh + restorable fallback', (
       const json = JSON.parse(jsonRun.stdout) as DeletePayload
       expect(json.results[0]?.backend).toBe('nmh')
       expect(json.trashFallback).toBe(true)
-      expect(json.trashBatch).toContain('.nmh/trash/trash-')
+      expect(json.trashBatch).toContain(path.join('.nmh', 'trash', 'trash-'))
       await expect(fs.access(entry)).rejects.toBeTruthy()
 
       // the plain run announces the fallback on stderr (side-channel, stdout stays clean)

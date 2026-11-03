@@ -54,6 +54,11 @@ async function globalFixture(): Promise<GlobalFixture> {
   const shim = path.join(shimDir, 'npm')
   await fs.writeFile(shim, `#!/bin/sh\necho "${gRoot}"\n`)
   await fs.chmod(shim, 0o755)
+  // Windows twin: cmd.exe resolves PATH with PATHEXT (npm → npm.cmd); bare execFile
+  // cannot start a batch — the product probes via shell there, so the shim pair
+  // (sh + .cmd) keeps this fixture deterministic on every platform.
+  const cmdShim = path.join(shimDir, 'npm.cmd')
+  await fs.writeFile(cmdShim, `@echo off\r\necho ${gRoot}\r\n`)
   return { root, gRoot, binDir, shimDir }
 }
 

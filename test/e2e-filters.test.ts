@@ -136,8 +136,9 @@ describe('scan filters e2e (spawned CLI, non-TTY)', () => {
       const compact = await runCli(['scan', fx.root], { cwd: fx.root })
       expect(compact.code).toBe(0)
       expect(compact.stdout).not.toContain(fx.paths.webEntry)
-      expect(compact.stdout).toContain('./web/node_modules')
-      expect(compact.stdout).toContain('web/node_modules')
+      // shortened form ends in the un-prefixed tail on every OS (the prefix is
+      // `./` under cwd, but `~/…` wins when tmpdir sits inside the profile)
+      expect(compact.stdout).toContain(path.join('web', 'node_modules'))
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
     }
