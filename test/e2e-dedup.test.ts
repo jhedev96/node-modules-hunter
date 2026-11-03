@@ -45,7 +45,7 @@ describe('dedup suggestion e2e (lockfile-aware ranges, PRD §8.2)', () => {
       expect(text.stdout).toContain('DEDUP SUGGESTION')
       expect(text.stdout).toContain('zod@3.23.0')
       // displayPath form depends on HOME (pinned to the fixture here) → assert the un-prefixed part
-      expect(text.stdout).toContain('p/node_modules')
+      expect(text.stdout).toContain(path.join('p', 'node_modules'))
       expect(text.stdout).toContain('p declared ^3.23.0 (dependencies)')
     } finally {
       await fs.rm(root, { recursive: true, force: true })

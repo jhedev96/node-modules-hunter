@@ -147,7 +147,8 @@ describe('config e2e (.nmhrc lookup, precedence, validation)', () => {
       const plain = await runCli(['--dir', 'proj'], { cwd: root, home: root, envExtra: { CI: 'true' } })
       expect(plain.code).toBe(0)
       expect(plain.stdout).not.toMatch(/\x1b\[/)
-      expect(plain.stdout).toContain('proj/node_modules')
+      // path separators differ per OS (Windows prints `proj\node_modules`)
+      expect(plain.stdout).toContain(path.join('proj', 'node_modules'))
     } finally {
       await fs.rm(root, { recursive: true, force: true })
     }
@@ -217,7 +218,9 @@ describe('config e2e (.nmhrc lookup, precedence, validation)', () => {
     const root = await depthFixture('cfg-none', { depth: 1 })
     try {
       await fs.unlink(path.join(root, '.nmhrc'))
-      const { run, payload } = await scanJson(['scan', 'proj', '--json'], { cwd: root })
+      // home pinned: on a shared runner the walk must stop at the fixture and
+      // never reach the real profile (another worker's .nmhrc must not leak in)
+      const { run, payload } = await scanJson(['scan', 'proj', '--json'], { cwd: root, home: root })
       expect(run.code).toBe(0)
       expect(payload.totals.folders).toBeGreaterThan(1) // default depth reaches deeper than 1
     } finally {

@@ -31,7 +31,13 @@ export async function runCli(
   // suspenders, covering code paths that might bypass the logger.
   env.NO_COLOR = '1'
   delete env.FORCE_COLOR
-  if (options.home) env.HOME = options.home
+  if (options.home) {
+    env.HOME = options.home
+  // Windows: os.homedir() reads USERPROFILE, not HOME — without this pin the
+  // spawned CLI wrote recovery logs/baselines/.nmhrc into the runner's real
+  // profile instead of the fixture (the whole v1.1.0 windows matrix failed).
+    env.USERPROFILE = options.home
+  }
   if (options.envExtra) Object.assign(env, options.envExtra)
   try {
     const { stdout, stderr } = await execFileAsync(
