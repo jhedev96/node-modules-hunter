@@ -9,6 +9,7 @@ import { setLogDirectory } from './utils/delete-log.ts'
 import { REPORT_EXTENSIONS } from './utils/report.ts'
 import { validateBaselineName } from './utils/baseline.ts'
 import { runScan } from './commands/scan.ts'
+import { runUpdate } from './commands/update.ts'
 import { runConfigCommand, type ConfigCommandRequest, type ConfigOp } from './commands/config.ts'
 import { runSearch } from './commands/search.ts'
 import { runWhy } from './commands/why.ts'
@@ -392,6 +393,16 @@ async function main(): Promise<number> {
   if (subcommand === 'version') {
     printVersion(json)
     return 0
+  }
+
+  // update (v1.1): explicit self-update — npm view → npm install -g, with a manual
+  // advice path for installs that came from anywhere else. No scan/delete flags apply.
+  if (subcommand === 'update') {
+    if (deleted.given || rest.length > 0) {
+      errorLog('update takes no arguments — plain `nmh update` (add --json for the payload)')
+      return 1
+    }
+    return runUpdate({ json })
   }
 
   // config: persisted .nmhrc management (v0.9) — info · set · add · remove · unset, prompt-free
