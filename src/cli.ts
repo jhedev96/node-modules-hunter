@@ -169,13 +169,25 @@ async function main(): Promise<number> {
   const json = flags.json === true || (Array.isArray(flags.json) && flags.json.includes(true))
   // same story for --animate: argv is the only way to tell "flag given" from "cac default"
   const progress: 'auto' | 'on' | 'off' = normalizeAnimate(process.argv, config.animate)
+  // ANSI policy (v1.1.1): paint only where it has value — a real TTY, or an explicit
+  // opt-in (`--color` flag, FORCE_COLOR env). Piped/CI runs print plain text:
+  // picocolors itself enables color inside ANY CI environment (its `!!env.CI`
+  // heuristic) even on a pipe, which once broke greppable output and the whole
+  // CI test matrix; the TTY rule makes output deterministic everywhere.
+  const isTTY = process.stdout.isTTY === true
+  const colorForced =
+    cliColorExplicit ||
+    (process.env.FORCE_COLOR !== undefined &&
+      process.env.FORCE_COLOR !== '0' &&
+      process.env.FORCE_COLOR !== 'false')
   configureLogger({
     verbose: flags.verbose === true,
     quiet: flags.quiet === true,
     noColor:
       flags.noColor === true ||
       flags.color === false || // explicit CLI --no-color wins over config
-      (config.color === false && !cliColorExplicit),
+      (config.color === false && !cliColorExplicit) ||
+      (!isTTY && !colorForced),
     // --json shares stdout with the live counter → counter must stay silent
     progress: json ? 'off' : progress,
   })

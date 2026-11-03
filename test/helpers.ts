@@ -25,6 +25,12 @@ export async function runCli(
   options: { cwd?: string; home?: string; timeout?: number; envExtra?: Record<string, string> } = {},
 ): Promise<RunResult> {
   const env: NodeJS.ProcessEnv = { ...process.env }
+  // Hermetic children: CI environments (the runner itself sets CI=true) make
+  // picocolors paint even on a pipe, which would break plain-substring asserts.
+  // Product policy already gates ANSI on a real TTY — this is the belt to the
+  // suspenders, covering code paths that might bypass the logger.
+  env.NO_COLOR = '1'
+  delete env.FORCE_COLOR
   if (options.home) env.HOME = options.home
   if (options.envExtra) Object.assign(env, options.envExtra)
   try {

@@ -138,6 +138,21 @@ describe('config e2e (.nmhrc lookup, precedence, validation)', () => {
     }
   })
 
+  it('piped child prints plain text even inside a CI env (picocolors !!env.CI regression)', async () => {
+    // GitHub Actions exports CI=true for every child; picocolors turns color on
+    // in ANY CI env even on a pipe. nmh's own TTY policy must win — otherwise
+    // all plain-substring e2e asserts fail on CI (the v1.1.0 matrix break).
+    const root = await depthFixture('cfg-ci-plain', { depth: 1 })
+    try {
+      const plain = await runCli(['--dir', 'proj'], { cwd: root, home: root, envExtra: { CI: 'true' } })
+      expect(plain.code).toBe(0)
+      expect(plain.stdout).not.toMatch(/\x1b\[/)
+      expect(plain.stdout).toContain('proj/node_modules')
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('logDir redirects recovery logs (relative to cwd)', async () => {
     const root = await depthFixture('cfg-logdir', { depth: 1, logDir: 'logs', defaultMode: 'trash' })
     try {
