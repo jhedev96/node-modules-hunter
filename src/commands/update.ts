@@ -217,9 +217,18 @@ async function isNpmGlobal(): Promise<boolean> {
  */
 async function distTagsMap(allowSpawn: boolean): Promise<Record<string, string> | null> {
   const collect = (raw: unknown): Record<string, string> | null => {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+    // npm ≥12 prints `npm view <pkg> dist-tags --json` as an ABBREVIATED PACKUMENT
+    // ARRAY (one object inside) — the same shape trap the v1.2.1 hotfix fixed for
+    // `npm view <pkg> --json`; accept both shapes, last object wins.
+    let source: unknown = raw
+    if (Array.isArray(raw)) {
+      const objects = raw.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+      if (objects.length === 0) return null
+      source = objects[objects.length - 1]
+    }
+    if (source === null || typeof source !== 'object' || Array.isArray(source)) return null
     const out: Record<string, string> = {}
-    for (const [name, version] of Object.entries(raw as Record<string, unknown>)) {
+    for (const [name, version] of Object.entries(source as Record<string, unknown>)) {
       if (typeof version === 'string' && VERSION_SHAPE.test(version)) out[name] = version
     }
     return Object.keys(out).length > 0 ? out : null

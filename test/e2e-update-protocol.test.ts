@@ -292,6 +292,13 @@ describe('nmh update dist-tags (v1.4) — tag compare, downgrade consent, config
       expect(payload.target).toBe('9.9.9-beta.2')
       expect(payload.latest).toBe('9.9.9') // latest keeps its historical meaning
       expect(payload.direction).toBe('upgrade')
+
+      // npm ≥12 wraps `npm view dist-tags --json` in a one-element array (v1.4.1 regression):
+      // the seam may carry either shape and the read must not sink
+      await fs.writeFile(path.join(root, 'dist-tags.json'), JSON.stringify([{ latest: '9.9.9', beta: '9.9.9-beta.2', lts: '0.5.0' }]))
+      const wrapped = await runCli(['update', '--check', 'lts'], { home: root, envExtra: env })
+      expect(wrapped.code).toBe(0)
+      expect(wrapped.stdout).toContain('0.5.0')
     } finally {
       await rmTree(root)
     }
