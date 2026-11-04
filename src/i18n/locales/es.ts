@@ -371,6 +371,7 @@ const es: Record<string, string> = {
   'help.flag.verbose': 'charla de depuración en stderr',
   'help.flag.noColor': 'apaga el color ANSI (auto: color solo en TTY real o con --color / FORCE_COLOR)',
   'help.flag.color': 'fuerza el color ANSI incluso en pipes (gana sobre config color:false)',
+  'help.flag.language': 'idioma de la UI: en | id | zh | ru | es — también vía .nmhrc `language` y NMH_LANG; los valores desconocidos vuelven a en en silencio',
   'help.flag.recursive': 'mira también DENTRO de los node_modules encontrados (auditoría anidada; el total sigue siendo de nivel superior)',
   'help.flag.pm': 'filtra por PM detectado: npm|pnpm|yarn|bun|vp — sin valor lista los detectados',
   'help.flag.exclude': 'excluye rutas de los resultados (lista de globs separada por comas, p. ej. **/e2e/**)',

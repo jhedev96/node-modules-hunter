@@ -89,6 +89,7 @@ const GROUPS = (): HelpGroup[] => [
       { usage: '--verbose', desc: t('help.flag.verbose') },
       { usage: '--no-color', desc: t('help.flag.noColor') },
       { usage: '--color', desc: t('help.flag.color') },
+      { usage: '--language <lang>', desc: t('help.flag.language') },
     ],
   },
   {

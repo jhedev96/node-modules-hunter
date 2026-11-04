@@ -22,6 +22,34 @@ describe('i18n e2e (v1.3.0) — --language flag, .nmhrc, NMH_LANG', () => {
     expect(run.stdout).toContain('Contoh')
   })
 
+  it('--language zh localizes help (CJK, not English)', async () => {
+    const run = await runCli(['--language', 'zh', 'help'])
+    expect(run.code).toBe(0)
+    expect(run.stdout).toContain('用法')
+    expect(run.stdout).toContain('命令')
+    expect(run.stdout).toContain('示例')
+    expect(run.stdout).toContain('--language <lang>')
+    expect(run.stdout).not.toContain('Commands')
+  })
+
+  it('--language ru localizes help (Cyrillic, not English)', async () => {
+    const run = await runCli(['--language', 'ru', 'help'])
+    expect(run.code).toBe(0)
+    expect(run.stdout).toContain('Использование')
+    expect(run.stdout).toContain('Команды')
+    expect(run.stdout).toContain('Примеры')
+    expect(run.stdout).toContain('--language <lang>')
+    expect(run.stdout).not.toContain('Commands')
+  })
+
+  it('help documents the --language flag in every locale', async () => {
+    for (const locale of ['en', 'id', 'zh', 'ru', 'es']) {
+      const run = await runCli(['--language', locale, 'help'])
+      expect(run.code, `locale ${locale}`).toBe(0)
+      expect(run.stdout, `locale ${locale}`).toContain('--language <lang>')
+    }
+  })
+
   it('every locale renders `version` exit 0 without raw catalog keys leaking', async () => {
     for (const locale of ['en', 'id', 'zh', 'ru', 'es']) {
       const run = await runCli(['--language', locale, 'version'])
@@ -45,6 +73,18 @@ describe('i18n e2e (v1.3.0) — --language flag, .nmhrc, NMH_LANG', () => {
     })
     expect(run.code).toBe(2)
     expect(run.stderr).toContain('nada que cazar aquí')
+  })
+
+  it('NMH_LANG zh and ru localize the scan path too', async () => {
+    for (const [locale, localized] of [['zh', '这里没有可猎的'], ['ru', 'не на что охотиться']] as const) {
+      const dir = await tmpRoot(`i18n-env-${locale}`)
+      const run = await runCli(['scan', '--size', 'total'], {
+        cwd: dir,
+        envExtra: { NMH_LANG: locale, LANG: '', LC_ALL: '' },
+      })
+      expect(run.code, `locale ${locale}`).toBe(2)
+      expect(run.stderr, `locale ${locale}`).toContain(localized)
+    }
   })
 
   it('.nmhrc `language` localizes — and sits above NMH_LANG', async () => {

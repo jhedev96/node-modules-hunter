@@ -371,6 +371,7 @@ const id: Record<string, string> = {
   'help.flag.verbose': 'obrolan debug di stderr',
   'help.flag.noColor': 'matikan warna ANSI (auto: warna hanya di TTY sungguhan atau dengan --color / FORCE_COLOR)',
   'help.flag.color': 'paksa warna ANSI meski dijalankan di pipe (menang atas config color:false)',
+  'help.flag.language': 'bahasa UI: en | id | zh | ru | es — juga lewat .nmhrc `language` dan NMH_LANG; nilai tak dikenal diam-diam jatuh ke en',
   'help.flag.recursive': 'lihat juga DI DALAM node_modules yang ditemukan (audit nested; total tetap top-level saja)',
   'help.flag.pm': 'filter berdasarkan PM terdeteksi: npm|pnpm|yarn|bun|vp — tanpa nilai mendaftar yang terdeteksi',
   'help.flag.exclude': 'kecualikan path dari hasil (daftar glob dipisah koma, mis. **/e2e/**)',
