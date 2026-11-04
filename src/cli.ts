@@ -1,7 +1,7 @@
 import { cac } from 'cac'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { configureLogger, errorLog, warn, verboseLog, note } from './utils/logger.ts'
+import { configureLogger, errorLog, warn, verboseLog, note, isTTYOut, log } from './utils/logger.ts'
 import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
 import { printHelp } from './utils/help.ts'
@@ -22,6 +22,7 @@ import { runStats } from './commands/stats.ts'
 import { runDelete } from './commands/delete.ts'
 import { runClean } from './commands/clean.ts'
 import { runWizard } from './commands/wizard.ts'
+import { renderFullBanner } from './utils/banner.ts'
 import { runGlobal } from './commands/global.ts'
 import type { DeleteMode } from './core/result.ts'
 import type { NmhConfig } from './utils/config.ts'
@@ -78,6 +79,10 @@ cli.option('--reinstall', 'stats only: naive npm-ci-style estimate of the time t
 cli.option('--treemap [file]', 'treemap export: single-file HTML (vanilla JS, no deps); default nmh-treemap.html in cwd')
 cli.option('--out <file>', 'treemap only: where to write the HTML file (same as --treemap <file>)')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
+cli.option('--check', 'update only: compare installed vs registry and exit — never installs')
+cli.option('--info', 'update only: full registry detail (npm view style) — never installs')
+cli.option('-n, --no', 'update only: decline the update on the command line (nothing installs)')
+cli.option('--wizard', 'open the interactive wizard explicitly (same as the bare `nmh`); needs a TTY')
 cli.option('--default-exclude <globs>', 'config family: manage the persisted exclude list (comma list; special value "self")')
 cli.option('--default-keep <pkgs>', 'config family: manage the persisted keep list (comma list; special value "self")')
 cli.option('--default-mode <mode>', 'config family: set the persisted defaultMode (hard | soft | trash)')
@@ -85,11 +90,14 @@ cli.option('--log-dir <dir>', 'config family: set the persisted recovery-log dir
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
-/** Every dispatchable first-token (PRD §7 commands + analyze/info aliases). */
+/** Every dispatchable first-token (PRD §7 commands + analyze/info aliases + wizard v1.2). */
 const KNOWN_SUBCOMMANDS = new Set([
   'scan', 'clean', 'search', 'map', 'why', 'treemap', 'stats',
-  'analyze', 'info', 'config', 'update', 'version', 'help',
+  'analyze', 'info', 'config', 'update', 'version', 'help', 'wizard',
 ])
+
+/** Read-only views the wizard `--` router may open before the menu (v1.2). */
+const WIZARD_VIEWS = new Set(['stats', 'analyze', 'info', 'map', 'search', 'why', 'treemap'])
 
 function looksLikePath(text: string): boolean {
   return (
@@ -149,8 +157,21 @@ function normalizeDepth(value: unknown): number | null | 'invalid' {
   return 'invalid'
 }
 
-async function main(): Promise<number> {
-  const parsed = cli.parse(process.argv, { run: false })
+let updateNoticeShown = false
+
+/**
+ * Parse + dispatch one argv. `main()` enters with process.argv; the wizard `--` router
+ * re-enters with the view segment only — that is the recursion this shape exists for.
+ */
+async function runCli(userArgs: string[]): Promise<number> {
+  // The standalone `--` token is reserved for the wizard router (v1.2): everything after
+  // it belongs to the view command. Split BEFORE cac parses so the flags of both segments
+  // stay independent (`nmh wizard --dir=a -- stats --dir=b --top 5`).
+  const dd = userArgs.indexOf('--')
+  const routerTokens = dd >= 0 ? userArgs.slice(dd + 1) : null
+  const headArgs = dd >= 0 ? userArgs.slice(0, dd) : userArgs
+
+  const parsed = cli.parse(['node', 'nmh', ...headArgs], { run: false })
   const flags = parsed.options as Record<string, unknown>
   const positionals = (parsed.args ?? []).filter((token): token is string => typeof token === 'string')
 
@@ -222,8 +243,10 @@ async function main(): Promise<number> {
     progress: json ? 'off' : progress,
   })
 
-  // --update-check (PRD §5.5): opt-in, 24 h cache, failures stay silent — never on a JSON note
-  if (flags.updateCheck === true || config.updateCheck === true) {
+  // --update-check (PRD §5.5): opt-in, 24 h cache, failures stay silent — never on a JSON note.
+  // The wizard router re-enters runCli: the notice must print once per process, not per dispatch.
+  if (!updateNoticeShown && (flags.updateCheck === true || config.updateCheck === true)) {
+    updateNoticeShown = true
     const notice = await checkForUpdate().catch(() => null)
     if (notice !== null) note(notice)
   }
@@ -470,14 +493,85 @@ async function main(): Promise<number> {
     return 0
   }
 
-  // update (v1.1): explicit self-update — npm view → npm install -g, with a manual
-  // advice path for installs that came from anywhere else. No scan/delete flags apply.
+  // --check/--info are update-only knobs — anywhere else they are a mistake, say so loud
+  if ((flags.check !== undefined && flags.check !== false) && subcommand !== 'update') {
+    errorLog('--check only works with the update command — nmh update --check')
+    return 1
+  }
+  if ((flags.info !== undefined && flags.info !== false) && subcommand !== 'update') {
+    errorLog('--info only works with the update command — nmh update --info')
+    return 1
+  }
+
+  // update (v1.1 explicit, v1.2 consented): --check/--info are read-only views; the plain
+  // run shows facts and asks before installing (-y installs, -n declines, --force skips
+  // the ask). No scan/delete flags apply.
   if (subcommand === 'update') {
     if (deleted.given || rest.length > 0) {
       errorLog('update takes no arguments — plain `nmh update` (add --json for the payload)')
       return 1
     }
-    return runUpdate({ json })
+    if (flags.check === true && flags.info === true) {
+      errorLog('--check and --info are two different read-only views — pick one (nmh update --check | --info)')
+      return 1
+    }
+    return runUpdate({
+      json,
+      mode: flags.check === true ? 'check' : flags.info === true ? 'info' : 'default',
+      answer: flags.yes === true ? 'yes' : flags.no === true ? 'no' : 'none',
+      force: flags.force === true,
+    })
+  }
+
+  // wizard (v1.2): a registered command at last. Explicit targets ride --dir (no
+  // auto-climb); `nmh --wizard` is the flag form; the `--` router opens a read-only
+  // view first, then drops into the menu. All of it needs a TTY — pipes get rc 1
+  // with directions (the bare `nmh` fallback scan keeps its own non-TTY path below).
+  const wizardIntent = subcommand === 'wizard' || flags.wizard === true
+  if (routerTokens !== null && !wizardIntent) {
+    errorLog('the `--` router belongs to the wizard — nmh wizard -- stats|map|search|why|treemap …')
+    return 1
+  }
+  let routerView: string[] | null = null
+  if (routerTokens !== null) {
+    const view = routerTokens[0]
+    if (typeof view !== 'string' || !WIZARD_VIEWS.has(view)) {
+      errorLog(`unknown wizard view: ${String(view ?? '(empty)')} — the router opens a read-only view: stats (analyze, info) | map | search | why | treemap`)
+      return 1
+    }
+    routerView = routerTokens
+  }
+  if (wizardIntent) {
+    // positional targets are the scan shortcut's syntax — the wizard scopes via --dir only
+    // (rest, not positionals: for `nmh wizard …` the command token itself sits in positionals)
+    if (rest.length > 0) {
+      errorLog('wizard takes no positional targets — scope it with --dir=./repo1,./repo2 (or `nmh wizard -- <view> …`)')
+      return 1
+    }
+    if (deleted.given) {
+      errorLog('--delete does not belong to the wizard — the menu asks for the mode itself')
+      return 1
+    }
+    if (!isTTYOut()) {
+      errorLog('the wizard needs a TTY (it is an arrow-key menu) — use nmh scan / --dir / the plain commands instead; bare `nmh` in a pipe stays a read-only scan')
+      return 1
+    }
+    if (routerView !== null) {
+      // banner first, then the view as a plain one-shot run (its own flags & targets),
+      // then the menu — a rc 1 from the view (usage error) ends the whole run
+      log(renderFullBanner())
+      const viewCode = await runCli(routerView)
+      if (viewCode === 1) return 1
+    }
+    return runWizard(cwd, {
+      defaultMode: config.defaultMode,
+      json,
+      settings: { source: configSource, values: config },
+      excludes: excludes.length > 0 ? excludes : undefined,
+      keep: keep.length > 0 ? keep : undefined,
+      targets: dirTargets.length > 0 ? dirTargets : undefined,
+      banner: routerView === null,
+    })
   }
 
   // config: persisted .nmhrc management (v0.9) — info · set · add · remove · unset, prompt-free
@@ -851,6 +945,10 @@ function normalizeAnimate(argv: string[], configAnimate?: boolean): 'auto' | 'on
   if (argv.includes('--no-animate') || argv.includes('--animate=false')) return 'off'
   if (argv.includes('--animate') || argv.includes('--animate=true')) return 'on'
   return configAnimate === false ? 'off' : 'auto'
+}
+
+function main(): Promise<number> {
+  return runCli(process.argv.slice(2))
 }
 
 main()

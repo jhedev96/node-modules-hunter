@@ -24,6 +24,11 @@ export async function runWizard(
   return runInteractiveWizard(cwd, options)
 }
 
+/** Internal scan targets: explicit --dir scope when given, else the cwd-driven default. */
+function wizardTargets(options: WizardOptions): string[] {
+  return options.targets !== undefined && options.targets.length > 0 ? options.targets : ['.']
+}
+
 export interface WizardSettings {
   /** .nmhrc path that supplied the values, when one was found. */
   source: string | null
@@ -40,6 +45,10 @@ export interface WizardOptions {
   excludes?: string[]
   /** Merged keep list — same plumbing as excludes; `self` stays a scan-level guard here too. */
   keep?: string[]
+  /** v1.2: explicit --dir targets — respected as-is, the auto-climb scouting is skipped. */
+  targets?: string[]
+  /** v1.2: the `nmh wizard -- <view>` router prints the banner before the view runs; the menu run then skips it. */
+  banner?: boolean
 }
 
 /** Wizard quick-scan depth (PRD §7.5 step 2). The menu never supplies --depth; keep one source of truth. */
@@ -112,12 +121,13 @@ async function resolveWizardScope(cwd: string): Promise<WizardScope> {
  */
 async function runFallbackScan(cwd: string, options: WizardOptions): Promise<number> {
   if (!options.json) log(renderCompactBanner())
-  const scope = await resolveWizardScope(cwd)
+  const explicit = options.targets !== undefined && options.targets.length > 0
+  const scope = explicit ? { root: cwd, from: cwd, climbed: false, scouted: false } : await resolveWizardScope(cwd)
   if (!options.json && scope.climbed) {
     warn(`no node_modules within 3 levels of cwd — scoped to the project root above: ${scope.root}`)
   }
   const outcome = await collectScan({
-    targets: ['.'],
+    targets: wizardTargets(options),
     cwd: scope.root,
     maxDepth: WIZARD_DEPTH,
     excludes: options.excludes,
@@ -142,15 +152,16 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
  * looping back after read-only actions until the user quits.
  */
 async function runInteractiveWizard(cwd: string, options: WizardOptions): Promise<number> {
-  log(renderFullBanner())
-  const scope = await resolveWizardScope(cwd)
+  const explicit = options.targets !== undefined && options.targets.length > 0
+  if (options.banner !== false) log(renderFullBanner())
+  const scope = explicit ? { root: cwd, from: cwd, climbed: false, scouted: false } : await resolveWizardScope(cwd)
   if (scope.climbed) {
     log(colors.dim(`cwd has no node_modules in 3 levels — scoped up to the project root ${scope.root}`))
   }
 
   for (;;) {
     const scan = await collectScan({
-      targets: ['.'],
+      targets: wizardTargets(options),
       cwd: scope.root,
       maxDepth: WIZARD_DEPTH,
       excludes: options.excludes,
@@ -195,14 +206,14 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
           warn('search skipped — back to the menu')
           continue
         }
-        await runSearch({ pattern: String(pattern).trim(), targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
+        await runSearch({ pattern: String(pattern).trim(), targets: wizardTargets(options), cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       }
       case 'map':
-        await runMap({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
+        await runMap({ targets: wizardTargets(options), cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       case 'stats':
-        await runStats({ targets: ['.'], cwd: scope.root, maxDepth: WIZARD_DEPTH })
+        await runStats({ targets: wizardTargets(options), cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
       case 'settings':
         log(renderSettings(options.settings, scope))

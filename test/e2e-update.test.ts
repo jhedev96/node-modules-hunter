@@ -67,12 +67,12 @@ describe('nmh update (v1.1) — explicit self-update', () => {
     }
   })
 
-  it('outdated + npm-global: installs via npm (recorded by the fake-install hatch)', async () => {
+  it('outdated + npm-global: installs via npm on -y (recorded by the fake-install hatch)', async () => {
     const root = await tmpRoot('update-global')
     try {
       await fs.writeFile(path.join(root, 'latest.json'), JSON.stringify({ version: '9.9.9' }), 'utf8')
       const fake = path.join(root, 'fake-install.txt')
-      const run = await runCli(['update', '--json'], {
+      const run = await runCli(['update', '--json', '-y'], {
         home: root,
         envExtra: { ...seams(root, '9.9.9', '1'), NMH_UPDATE_FAKE_INSTALL: fake },
       })

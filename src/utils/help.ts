@@ -26,6 +26,7 @@ export interface HelpGroup {
 const COMMANDS: HelpCommand[] = [
   { usage: 'nmh', desc: 'interactive wizard: arrow menu (delete all / pick / search / map / report / settings)' },
   { usage: 'nmh <path> [path…]', desc: 'shortcut: scan given path(s); one-liner actions via flags (--delete, --search, …)' },
+  { usage: 'nmh wizard [--dir …]', desc: 'v1.2: the wizard on explicit targets (--dir=./a,./b skips the auto-climb); -- <view> opens a view first' },
   { usage: 'nmh scan [dir]', desc: 'full scan across targets (default: cwd)' },
   { usage: 'nmh clean [dir]', desc: 'scan + delete everything safe (trash by default)' },
   { usage: 'nmh search <pattern> [dir…]', desc: 'find installed packages by name (+ versions & sizes) — read-only' },
@@ -35,7 +36,7 @@ const COMMANDS: HelpCommand[] = [
   { usage: 'nmh treemap [dir]', desc: 'single-file interactive HTML treemap → nmh-treemap.html' },
   { usage: 'nmh stats -g', desc: 'global installs across npm/pnpm/yarn/bun — read-only' },
   { usage: 'nmh config <op>', desc: 'manage .nmhrc from the CLI: info · set · add · remove · unset' },
-  { usage: 'nmh update', desc: 'self-update: compare installed vs npm latest, install if global' },
+  { usage: 'nmh update', desc: 'v1.2: shows the facts and asks before installing — --check / --info compare only; -y installs, -n declines, --force skips the ask' },
   { usage: 'nmh version', desc: 'banner: tool version, node+abi, OS/arch/kernel, tty (alias: -v / --version)' },
   { usage: 'nmh help', desc: 'this help (alias: -h / --help)' },
 ]
@@ -67,6 +68,8 @@ const GROUPS: HelpGroup[] = [
       { usage: '-d, --dir <paths>', desc: 'target dir(s), comma separated or repeated; globs and ~ allowed' },
       { usage: '--size <mode>', desc: "output shape: 'total' (just aggregate) or 'each' (default: per-folder table)" },
       { usage: '--save-report <file>', desc: 'also write the printed report to a file (.json/.md/.txt; --report <file> aliases it)' },
+      { usage: '--wizard', desc: 'v1.2: open the wizard explicitly — same as bare `nmh`, but a pipe refuses with directions instead of a scan' },
+      { usage: 'update: --check · --info · -y · -n · -f', desc: 'v1.2: read-only views vs consented install — see `nmh update` row above' },
       { usage: '--update-check', desc: 'peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)' },
     ],
   },
@@ -130,11 +133,14 @@ const GROUPS: HelpGroup[] = [
 
 const EXAMPLES = [
   ['nmh', 'wizard; the no-args menu auto-climbs to the nearest project root'],
+  ['nmh wizard --dir=./repo1,./repo2', 'wizard scoped to explicit targets — no auto-climb'],
+  ['nmh wizard -- stats --dir=./repo1', 'v1.2 router: stats view first, then the wizard menu'],
   ['nmh --dir=./proj,~/code/*/node_modules', 'multi-target scan'],
   ['nmh . --stale 90 --delete=trash -y', 'bury the stale boneyard, restorable trash'],
   ['nmh why react --expand', 'reverse-depend: who declares + who requires'],
   ['nmh stats --by type --json', 'dep-field breakdown as a machine payload'],
   ['nmh stats -g --top 20', 'the 20 biggest global installs across PMs'],
+  ['nmh update --check', 'compare installed vs registry — nothing installs'],
   ['nmh config set default-mode trash', 'persist a default delete mode in .nmhrc'],
 ]
 
