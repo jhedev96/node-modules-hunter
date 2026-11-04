@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { ConfigError, loadConfig, type NmhConfig } from '../utils/config.ts'
 import { errorLog, log, payload, colors } from '../utils/logger.ts'
 import { expandTilde } from '../utils/paths.ts'
+import { t, isLocale } from '../i18n/index.ts'
 
 export type ConfigOp = 'info' | 'set' | 'add' | 'remove' | 'unset'
 
@@ -23,10 +24,11 @@ export interface ConfigCommandRequest {
   animate?: boolean | string | Array<boolean | string>
   color?: boolean | string | Array<boolean | string>
   updateCheck?: boolean | string | Array<boolean | string>
+  language?: string | boolean | Array<string | boolean>
 }
 
 const VALID_MODES = new Set(['hard', 'soft', 'trash'])
-const KNOWN_KEYS = ['defaultMode', 'depth', 'exclude', 'keep', 'color', 'animate', 'updateCheck', 'logDir'] as const
+const KNOWN_KEYS = ['defaultMode', 'depth', 'exclude', 'keep', 'color', 'animate', 'updateCheck', 'logDir', 'language'] as const
 type KnownKey = (typeof KNOWN_KEYS)[number]
 
 const KEY_TO_FLAG: Record<KnownKey, string> = {
@@ -38,6 +40,7 @@ const KEY_TO_FLAG: Record<KnownKey, string> = {
   animate: 'animate',
   updateCheck: 'update-check',
   logDir: 'log-dir',
+  language: 'language',
 }
 const LIST_KEYS: Record<'default-exclude' | 'default-keep', KnownKey> = {
   'default-exclude': 'exclude',
@@ -93,11 +96,11 @@ function flagBool(raw: unknown): Given<boolean> {
 function parseDepth(raw: unknown): number {
   const given = scalar(raw)
   if (!given.given || given.value === null) {
-    throw new ConfigError('--depth needs a non-negative integer — nmh config set --depth 2')
+    throw new ConfigError(t('config.err.depthNeedsValue'))
   }
   const numeric = typeof given.value === 'number' ? given.value : Number(String(given.value).trim())
   if (!Number.isInteger(numeric) || numeric < 0) {
-    throw new ConfigError(`invalid --depth value: ${JSON.stringify(given.value)} (expected a non-negative integer)`)
+    throw new ConfigError(t('config.err.invalidDepthValue', { value: JSON.stringify(given.value) }))
   }
   return numeric
 }
@@ -105,15 +108,23 @@ function parseDepth(raw: unknown): number {
 function parseMode(raw: unknown): 'hard' | 'trash' {
   const value = scalar(raw).value
   if (typeof value !== 'string' || !VALID_MODES.has(value)) {
-    throw new ConfigError(`invalid --default-mode: ${JSON.stringify(value ?? null)} (expected hard | soft | trash)`)
+    throw new ConfigError(t('config.err.invalidModeValue', { value: JSON.stringify(value ?? null) }))
   }
   return value === 'soft' ? 'trash' : (value as 'hard' | 'trash')
+}
+
+function parseLanguage(raw: unknown): string {
+  const value = scalar(raw).value
+  if (typeof value !== 'string' || !isLocale(value.trim().toLowerCase())) {
+    throw new ConfigError(t('config.err.invalidLanguageValue', { value: JSON.stringify(value ?? null) }))
+  }
+  return value.trim().toLowerCase()
 }
 
 function parseBool(raw: unknown, label: string): boolean {
   const given = flagBool(raw)
   if (given.value === null) {
-    throw new ConfigError(`${label} needs true or false — e.g. nmh config set --animate=false`)
+    throw new ConfigError(t('config.err.boolNeedsValue', { label }))
   }
   return given.value
 }
@@ -140,10 +151,10 @@ function listMutation(op: ConfigOp, flag: 'default-exclude' | 'default-keep', gi
   const bare = given.value === null
   switch (op) {
     case 'set':
-      if (bare) throw new ConfigError(`config set --${flag} needs the list value — e.g. --${flag}=.npm,.nvm`)
+      if (bare) throw new ConfigError(t('config.err.setListNeedsValue', { flag }))
       return { key, mode: 'replace', values: given.value ?? [] }
     case 'add':
-      if (bare) throw new ConfigError(`config add --${flag} needs items to append — e.g. --${flag}=.cache,self`)
+      if (bare) throw new ConfigError(t('config.err.addListNeedsValue', { flag }))
       return { key, mode: 'append', values: given.value ?? [] }
     default:
       if (bare) return { key, mode: 'clear', values: [] }
@@ -161,16 +172,17 @@ function assemble(request: ConfigCommandRequest): Mutation {
     if (defaultKeep.given) mutation.lists.push(listMutation('set', 'default-keep', defaultKeep))
     if (scalar(request.depth).given) mutation.scalars.depth = parseDepth(request.depth)
     if (scalar(request.defaultMode).given) mutation.scalars.defaultMode = parseMode(request.defaultMode)
+    if (scalar(request.language).given) mutation.scalars.language = parseLanguage(request.language)
     if (scalar(request.logDir).given) {
       const value = scalar(request.logDir).value
-      if (typeof value !== 'string' || value.length === 0) throw new ConfigError('--log-dir needs a non-empty directory path')
+      if (typeof value !== 'string' || value.length === 0) throw new ConfigError(t('config.err.logDirNeedsValue'))
       mutation.scalars.logDir = value
     }
     for (const key of ['animate', 'color', 'updateCheck'] as const) {
       if (flagBool(request[key]).given) mutation.scalars[key] = parseBool(request[key], `--${KEY_TO_FLAG[key]}`)
     }
     if (mutation.lists.length === 0 && Object.keys(mutation.scalars).length === 0) {
-      throw new ConfigError('config set needs at least one key — nmh config set --depth 2 | --default-mode trash | --default-exclude .npm,self | …')
+      throw new ConfigError(t('config.err.setNeedsKey'))
     }
     return mutation
   }
@@ -186,7 +198,7 @@ function assemble(request: ConfigCommandRequest): Mutation {
       used = true
     }
     if (!used) {
-      throw new ConfigError(`config ${request.op} works on list keys — use --default-exclude or --default-keep`)
+      throw new ConfigError(t('config.err.listOpsOnly', { op: request.op }))
     }
     return mutation
   }
@@ -194,11 +206,11 @@ function assemble(request: ConfigCommandRequest): Mutation {
   // unset: the flags mark which keys to delete from the file (back to defaults)
   if (defaultExclude.given) mutation.unsetKeys.push('exclude')
   if (defaultKeep.given) mutation.unsetKeys.push('keep')
-  for (const key of ['defaultMode', 'logDir', 'depth', 'animate', 'color', 'updateCheck'] as const) {
+  for (const key of ['defaultMode', 'logDir', 'depth', 'animate', 'color', 'updateCheck', 'language'] as const) {
     if (request[key] !== undefined) mutation.unsetKeys.push(key)
   }
   if (mutation.unsetKeys.length === 0) {
-    throw new ConfigError('config unset needs a key — e.g. nmh config unset --default-exclude (or --depth)')
+    throw new ConfigError(t('config.err.unsetNeedsKey'))
   }
   return mutation
 }
@@ -209,16 +221,16 @@ async function readRawConfig(file: string): Promise<Record<string, unknown>> {
     body = await fs.readFile(file, 'utf8')
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {} // fresh file
-    throw new ConfigError(`config unreadable: ${file} (${(err as NodeJS.ErrnoException).code ?? String(err)})`)
+    throw new ConfigError(t('config.err.unreadable', { file, code: (err as NodeJS.ErrnoException).code ?? String(err) }))
   }
   let raw: unknown
   try {
     raw = JSON.parse(body)
   } catch (err) {
-    throw new ConfigError(`invalid config: ${file} is not valid JSON (${err instanceof Error ? err.message : String(err)}) — fix it before nmh config writes`)
+    throw new ConfigError(t('config.err.notJsonWritable', { file, detail: err instanceof Error ? err.message : String(err) }))
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ConfigError(`invalid config: ${file} must contain a JSON object`)
+    throw new ConfigError(t('config.err.notObject', { file }))
   }
   return raw as Record<string, unknown>
 }
@@ -271,6 +283,7 @@ const INFO_DEFAULTS: Record<KnownKey, string> = {
   animate: '(auto: TTY only)',
   updateCheck: 'off',
   logDir: '~/.nmh',
+  language: 'en',
 }
 
 function renderInfo(source: string | null, values: Partial<NmhConfig>): string {
@@ -278,18 +291,18 @@ function renderInfo(source: string | null, values: Partial<NmhConfig>): string {
   const lines = [
     '',
     colors.bold('⚙  nmh config'),
-    row('active file', source ?? 'none — defaults in effect (create one: nmh config set …)'),
+    row(t('config.info.activeFile'), source ?? t('config.info.noFile')),
   ]
   for (const key of KNOWN_KEYS) {
     const value = (values as Record<string, unknown>)[key]
     const shown =
-      value === undefined ? INFO_DEFAULTS[key] : Array.isArray(value) ? `${value.length} item(s): ${value.join(', ')}` : String(value)
+      value === undefined ? INFO_DEFAULTS[key] : Array.isArray(value) ? t('config.info.items', { n: value.length, list: value.join(', ') }) : String(value)
     lines.push(row(key, shown))
   }
   lines.push(
     '',
-    colors.dim('manage: nmh config set · add · remove · unset (lists: --default-exclude / --default-keep)'),
-    colors.dim('special value "self" in exclude/keep = protect the folder nmh runs from (scan-level guard)'),
+    colors.dim(t('config.info.manageHint')),
+    colors.dim(t('config.info.selfHint')),
   )
   return lines.join('\n')
 }
@@ -299,7 +312,7 @@ export async function runConfigCommand(request: ConfigCommandRequest): Promise<n
   try {
     if (request.op === 'info') {
       if (request.defaultExclude !== undefined || request.defaultKeep !== undefined) {
-        throw new ConfigError('nmh config info is read-only — key flags belong to set/add/remove')
+        throw new ConfigError(t('config.err.infoReadOnly'))
       }
       const loaded = await loadConfig(request.explicitFile ?? null, request.cwd)
       if (request.json === true) {
@@ -342,12 +355,12 @@ export async function runConfigCommand(request: ConfigCommandRequest): Promise<n
       const label = `--${KEY_TO_FLAG[key as KnownKey]}`
       lines.push(
         Array.isArray(value)
-          ? `  ${colors.dim(label.padEnd(18, ' '))}${value.length} item(s): ${value.join(', ')}`
+          ? `  ${colors.dim(label.padEnd(18, ' '))}${t('config.info.items', { n: value.length, list: value.join(', ') })}`
           : `  ${colors.dim(label.padEnd(18, ' '))}${String(value)}`,
       )
     }
     for (const key of mutation.unsetKeys) {
-      lines.push(`  ${colors.dim(`--${KEY_TO_FLAG[key]}`.padEnd(18, ' '))}(removed from file)`)
+      lines.push(`  ${colors.dim(`--${KEY_TO_FLAG[key]}`.padEnd(18, ' '))}${t('config.info.removed')}`)
     }
     log(lines.join('\n'))
     return 0

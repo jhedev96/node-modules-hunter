@@ -6,6 +6,7 @@ import { listTopLevelPackages, createDepClassifier, ownManifestRequires, package
 import { readProjectLockGraph } from '../core/lockfile.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderWhyReport, renderWhyJson } from '../core/render.ts'
+import { t } from '../i18n/index.ts'
 import type { WhyInstanceInfo, WhyOutcome } from '../core/result.ts'
 
 export interface WhyRequest {
@@ -95,7 +96,7 @@ export async function runWhy(request: WhyRequest): Promise<number> {
             const measured = await measureEntry(target.path)
             size = measured.size
           }
-          verboseLog(`why: ${request.pkg} in ${entry.displayPath} — ${requiredBy.length} requirer(s) (${requiredByGrade})`)
+          verboseLog(t('verbose.whyRequirers', { pkg: request.pkg, path: entry.displayPath, count: requiredBy.length, grade: requiredByGrade }))
           return {
             displayPath: entry.displayPath,
             pm: entry.pm.family,
@@ -120,7 +121,7 @@ export async function runWhy(request: WhyRequest): Promise<number> {
       payload(renderWhyJson({ pkg: request.pkg, instances, permissionIssues: scan.result.permissionIssues, code }, request))
       return 2
     }
-    warn(`no instance of '${request.pkg}' in the scanned node_modules — nmh why <pkg> [dirs]`)
+    warn(t('why.warn.none', { pkg: request.pkg }))
     return 2
   }
 

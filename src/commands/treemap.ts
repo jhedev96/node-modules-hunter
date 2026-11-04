@@ -3,6 +3,7 @@ import path from 'node:path'
 import { collectMap } from './map.ts'
 import { log, warn, verboseLog, errorLog, payload } from '../utils/logger.ts'
 import { renderTreemapHtml, type TreemapData } from '../core/treemap.ts'
+import { t } from '../i18n/index.ts'
 
 export interface TreemapRequest {
   targets: string[]
@@ -55,7 +56,7 @@ export async function runTreemap(request: TreemapRequest): Promise<number> {
   }
 
   if (entries.length === 0) {
-    warn('no node_modules found — nothing to draw here 🙃')
+    warn(t('treemap.warn.none'))
     return 2
   }
 
@@ -64,10 +65,10 @@ export async function runTreemap(request: TreemapRequest): Promise<number> {
     await fs.mkdir(path.dirname(outPath), { recursive: true })
     await fs.writeFile(outPath, renderTreemapHtml(data), 'utf8')
   } catch (err) {
-    errorLog(`🛑 could not write the treemap file → ${outPath} — ${err instanceof Error ? err.message : String(err)}`)
+    errorLog(t('treemap.err.write', { path: outPath, detail: err instanceof Error ? err.message : String(err) }))
     return 1
   }
-  verboseLog(`treemap data: ${entries.length} entries, ${entries.reduce((sum, entry) => sum + entry.packages.length, 0)} packages`)
-  log(`🗺️ treemap → ${outPath} — buka di browser, hover cell buat detail`)
+  verboseLog(t('verbose.treemapData', { entries: entries.length, packages: entries.reduce((sum, entry) => sum + entry.packages.length, 0) }))
+  log(t('treemap.done', { path: outPath }))
   return 0
 }

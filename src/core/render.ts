@@ -2,6 +2,7 @@ import Table from 'cli-table3'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import { colors, isSilent, colorEnabled } from '../utils/logger.ts'
+import { t } from '../i18n/index.ts'
 import { formatBytes, formatAge, formatCo2, formatDuration, formatIdle } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
 import type { BaselineComparison, BaselineListItem } from '../utils/baseline.ts'
@@ -85,13 +86,13 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
   const maxSize = result.entries.reduce((max, entry) => (entry.nested === true ? max : Math.max(max, entry.size)), 0)
   const table = new Table({
     head: [
-      colors.dim('Path'),
-      colors.dim('Size'),
-      colors.dim('Share'),
-      colors.dim('Pkgs'),
-      colors.dim('PM'),
-      ...(showIdle ? [colors.dim('Idle')] : []),
-      colors.dim('Modified'),
+      colors.dim(t('common.path')),
+      colors.dim(t('common.size')),
+      colors.dim(t('common.share')),
+      colors.dim(t('common.packages')),
+      colors.dim(t('common.pm')),
+      ...(showIdle ? [colors.dim(t('common.idle'))] : []),
+      colors.dim(t('common.modified')),
     ],
     style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
@@ -99,7 +100,7 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
   const pushRow = (entry: ScanEntry, nested: boolean): void => {
     const display = options.expand === true ? entry.path : entry.displayPath
     const label = nested
-      ? `${colors.dim('└─')}${colors.dim(' nested ')}${display}`
+      ? `${colors.dim('└─')}${colors.dim(t('render.scan.nested'))}${display}`
       : colors.bold(display)
     table.push([
       label,
@@ -123,7 +124,7 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
   const lines = [table.toString(), renderScanTotals(result)]
   if (result.permissionIssues.length > 0) {
     lines.push(
-      colors.yellow(`⚠ ${result.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`),
+      colors.yellow(t('render.warn.permission', { n: result.permissionIssues.length })),
     )
   }
   return lines.join('\n')
@@ -132,8 +133,8 @@ function renderScanTable(result: ScanCommandResult, options: RenderScanOptions):
 export function renderScanTotals(result: ScanCommandResult): string {
   const { totals } = result
   const nestedCount = result.entries.filter((entry) => entry.nested).length
-  const nestedNote = nestedCount > 0 ? colors.dim(` (+${nestedCount} nested, not counted)`) : ''
-  return `💾 Total: ${formatBytes(totals.size)} across ${totals.folders} folder(s), ${totals.packages} packages${nestedNote}`
+  const nestedNote = nestedCount > 0 ? colors.dim(t('render.scan.nestedNote', { n: nestedCount })) : ''
+  return t('render.scan.total', { size: formatBytes(totals.size), folders: totals.folders, packages: totals.packages }) + nestedNote
 }
 
 export function renderScanJson(result: ScanCommandResult): string {
@@ -177,31 +178,34 @@ function totalsJson(totals: ScanTotals) {
 export function renderPlan(
   entries: ScanEntry[],
   mode: DeleteMode,
-  options: { maxShown?: number } = {},
+  options: { maxShown?: number; dryRun?: boolean } = {},
 ): string {
   const shown = options.maxShown ?? 20
-  const modeLabel = mode === 'hard' ? 'DELETE (permanent)' : 'TRASH (restorable)'
+  const modeLabel = mode === 'hard' ? t('render.plan.hardLabel') : t('render.plan.trashLabel')
   const total = entries.reduce((sum, entry) => sum + entry.size, 0)
 
-  const lines = [`[DRY RUN] Would ${modeLabel} ${entries.length} folder(s) (${formatBytes(total)}):`]
+  const header = options.dryRun === false
+    ? t('render.plan.notExecuted', { label: modeLabel, count: entries.length, size: formatBytes(total) })
+    : t('render.plan.dryRun', { label: modeLabel, count: entries.length, size: formatBytes(total) })
+  const lines = [header]
   for (const entry of entries.slice(0, shown)) {
     lines.push(
       `  ${colors.red('✗')} ${entry.displayPath} ${colors.dim(`(${formatBytes(entry.size)}${entry.pm.family === 'unknown' ? '' : `, ${entry.pm.family}`})`)}`,
     )
   }
-  if (entries.length > shown) lines.push(colors.dim(`  … plus ${entries.length - shown} more`))
-  lines.push('Run again without --dry-run to execute.')
+  if (entries.length > shown) lines.push(colors.dim(t('render.plan.more', { n: entries.length - shown })))
+  lines.push(t('render.plan.rerun'))
   return lines.join('\n')
 }
 
 export function renderDeleteSummary(outcome: DeleteOutcome, mode: DeleteMode): string {
-  const verb = mode === 'hard' ? 'Deleted' : 'Trashed'
+  const verb = mode === 'hard' ? t('render.delete.verbHard') : t('render.delete.verbTrash')
   const lines: string[] = []
   if (outcome.deleted > 0) {
-    lines.push(`✅ ${verb}: ${formatBytes(outcome.freed)} from ${outcome.deleted} folder(s)`)
+    lines.push(t('render.delete.deleted', { verb, size: formatBytes(outcome.freed), count: outcome.deleted }))
   }
   if (outcome.failed > 0) {
-    lines.push(colors.yellow(`⚠ ${outcome.failed} folder(s) failed — rerun with --verbose for details`))
+    lines.push(colors.yellow(t('render.delete.failed', { count: outcome.failed })))
   }
   return lines.join('\n')
 }
@@ -249,7 +253,7 @@ export function renderSearchResults(outcome: SearchOutcome, options: RenderSearc
   const totalMatches = outcome.results.reduce((sum, result) => sum + result.matches.length, 0)
   const lines = [
     colors.cyan(
-      `🔍 '${outcome.pattern}' → ${totalMatches} package(s) in ${outcome.results.length} node_modules`,
+      t('render.search.header', { pattern: outcome.pattern, count: totalMatches, dirs: outcome.results.length }),
     ),
   ]
 
@@ -261,7 +265,7 @@ export function renderSearchResults(outcome: SearchOutcome, options: RenderSearc
       `${colors.bold(display)}${badge} ${colors.dim(`· ${pmLabel(result.entry.pm)} · ${formatBytes(result.entry.size)}`)}`,
     )
     if (result.matches.length === 0) {
-      lines.push(`   ${colors.dim('(path match)')}`)
+      lines.push(t('render.search.pathMatch'))
       continue
     }
     for (const pkg of result.matches) {
@@ -339,11 +343,11 @@ function mapPmSuffix(project: MapProjectInfo): string {
 export function renderMapTable(projects: MapProjectInfo[], options: RenderMapOptions): string {
   const table = new Table({
     head: [
-      colors.dim('Project'),
-      colors.dim('PM'),
-      colors.dim('Size'),
-      colors.dim('TopPkgs'),
-      colors.dim('Declared'),
+      colors.dim(t('render.map.head.project')),
+      colors.dim(t('common.pm')),
+      colors.dim(t('common.size')),
+      colors.dim(t('render.map.head.topPkgs')),
+      colors.dim(t('render.map.head.declared')),
     ],
     style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
@@ -371,7 +375,7 @@ export function renderMapTree(projects: MapProjectInfo[], options: RenderMapOpti
     )
     const packages = project.topPackages
     if (packages.length === 0) {
-      lines.push(colors.dim('   (no top-level packages)'))
+      lines.push(colors.dim(t('render.map.noPkgs')))
       continue
     }
     packages.forEach((pkg, index) => {
@@ -392,7 +396,7 @@ export function renderMapDepend(projects: MapProjectInfo[], options: RenderMapOp
       `${projectNameOrPath(project, options)} ${colors.dim(`· ${mapEntryDisplay(project.entry, options)} · ${pmLabel(project.entry.pm)}`)}`,
     )
     if (project.declared === null) {
-      lines.push(colors.dim('   (no manifest with declared dependencies)'))
+      lines.push(colors.dim(t('render.map.noManifest')))
       continue
     }
     if (project.declared.dependencies.length > 0) {
@@ -402,7 +406,7 @@ export function renderMapDepend(projects: MapProjectInfo[], options: RenderMapOp
       lines.push(`   devDependencies: ${project.declared.devDependencies.join(', ')}`)
     }
     if (project.declared.dependencies.length + project.declared.devDependencies.length === 0) {
-      lines.push(colors.dim('   (no declared dependencies)'))
+      lines.push(colors.dim(t('render.map.noDeclared')))
     }
   }
   return lines.join('\n')
@@ -413,7 +417,7 @@ export function renderMapDependReverse(
   dependPkg: string,
   options: RenderMapOptions,
 ): string {
-  const lines = [colors.cyan(`🔗 '${dependPkg}' is declared by ${projects.length} project(s):`)]
+  const lines = [colors.cyan(t('render.map.declaredBy', { pkg: dependPkg, count: projects.length }))]
   for (const project of projects) {
     const where =
       project.declared?.dependencies.includes(dependPkg) === true
@@ -495,22 +499,22 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   const dim = colors.dim
   const lines: string[] = []
 
-  lines.push(colors.cyan(`📊 nmh stats — ${projectBadges(outcome.projects)}${overview.waste > 0 ? dim(' · dedup potential detected') : ''}`))
+  lines.push(colors.cyan(t('render.stats.title', { badges: projectBadges(outcome.projects) }) + (overview.waste > 0 ? dim(t('render.stats.dedupPotential')) : '')))
   lines.push('')
-  lines.push(`━━━ ${colors.bold('OVERVIEW')} ━━━`)
-  lines.push(`Total size        : ${formatBytes(overview.totalSize)} across ${overview.entryCount} node_modules`)
+  lines.push(`━━━ ${colors.bold(t('render.section.overview'))} ━━━`)
+  lines.push(t('render.stats.totalSize', { size: formatBytes(overview.totalSize), count: overview.entryCount }))
   lines.push(
-    `Packages          : ${overview.instances} instances / ${overview.unique} unique (dup ${overview.dupFactor}×)`,
+    t('render.stats.packages', { instances: overview.instances, unique: overview.unique, dup: overview.dupFactor }),
   )
   if (overview.declared !== null) {
-    lines.push(`Direct deps       : ${overview.declared} declared across the scanned projects`)
+    lines.push(t('render.stats.directDeps', { count: overview.declared }))
   }
-  lines.push(`Waste (dedupable) : ${formatBytes(overview.waste)} (${overview.wastePercent}% of package sizes)`)
+  lines.push(t('render.stats.waste', { size: formatBytes(overview.waste), percent: overview.wastePercent }))
 
   if (options.by === 'type') {
     // focused view (§8.1): overview + BY TYPE only — TOP/dedup sections stay hidden
     lines.push('')
-    lines.push(`━━━ ${colors.bold('BY TYPE')} ━━━`)
+    lines.push(`━━━ ${colors.bold(t('render.section.byType'))} ━━━`)
     for (const row of outcome.typeBreakdown) {
       if (row.packages === 0) continue
       lines.push(`${row.field.padEnd(22)}: ${formatBytes(row.size)} · ${row.packages} pkg`)
@@ -520,16 +524,16 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   if (options.by === 'licenses' || options.licenses === true) {
     // focused view (§8.1/§8.2): overview + LICENSES only
     lines.push('')
-    lines.push(`━━━ ${colors.bold('LICENSES')} ━━━`)
+    lines.push(`━━━ ${colors.bold(t('render.section.licenses'))} ━━━`)
     if (outcome.licenseBreakdown.length === 0) {
-      lines.push(colors.dim('no package manifests found — nothing to license'))
+      lines.push(colors.dim(t('render.stats.noLicenses')))
     }
     for (const row of outcome.licenseBreakdown) {
       const marker =
         row.production && row.copyleft
-          ? colors.yellow('  ⚠ copyleft di production dependencies')
+          ? colors.yellow(t('render.stats.copyleftProd'))
           : row.copyleft
-            ? colors.dim('  (copyleft, bukan prod-dep)')
+            ? colors.dim(t('render.stats.copyleftOther'))
             : ''
       lines.push(`${row.type.padEnd(24)}: ${formatBytes(row.size)} · ${row.packages} pkg${marker}`)
     }
@@ -538,44 +542,44 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   if (outcome.score !== null || outcome.co2 !== null) {
     // experimental focus (§8.2): overview + SCORE/CO2 only
     lines.push('')
-    lines.push(`━━━ ${colors.bold(outcome.score !== null ? 'BLOAT SCORE' : 'CO2 ESTIMATE')} ━━━ ${colors.dim('(experimental)')}`)
+    lines.push(`━━━ ${colors.bold(outcome.score !== null ? t('render.section.score') : t('render.section.co2'))} ━━━ ${colors.dim(t('render.stats.experimental'))}`)
     if (outcome.score !== null) {
       const { score, grade, components } = outcome.score
       const filled = Math.round((score / 100) * 20)
       lines.push(
-        `${String(score).padStart(3)} / 100  grade ${grade}  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}]`,
+        `${String(score).padStart(3)} / 100  ${t('render.stats.grade')} ${grade}  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}]`,
       )
-      lines.push(`${colors.dim('waste')}  ${components.wastePercent}%  → ${components.wastePoints} pt`)
-      lines.push(`${colors.dim('dup factor')}  ${components.dupFactor}×  → ${components.dupPoints} pt`)
+      lines.push(`${colors.dim(t('render.stats.wasteLabel'))}  ${components.wastePercent}%  → ${components.wastePoints} pt`)
+      lines.push(`${colors.dim(t('render.stats.dupLabel'))}  ${components.dupFactor}×  → ${components.dupPoints} pt`)
       if (components.deadPackages > 0) {
-        lines.push(`${colors.dim('dead')}  ${components.deadPercent}% (${components.deadPackages} pkg)  → ${components.deadPoints} pt`)
+        lines.push(`${colors.dim(t('render.stats.deadLabel'))}  ${components.deadPercent}% (${components.deadPackages} pkg)  → ${components.deadPoints} pt`)
       } else {
-        lines.push(`${colors.dim('dead')}  (tidak diaudit — tambahkan --dead untuk daftar)  → 0 pt`)
+        lines.push(`${colors.dim(t('render.stats.deadLabel'))}  ${t('render.stats.deadNotAudited')}  → 0 pt`)
       }
-      lines.push(`${colors.dim('size')}  ${formatBytes(outcome.overview.totalSize)}  → ${components.sizePoints} pt`)
+      lines.push(`${colors.dim(t('render.stats.sizeLabel'))}  ${formatBytes(outcome.overview.totalSize)}  → ${components.sizePoints} pt`)
     }
     if (outcome.co2 !== null) {
-      lines.push(`${colors.dim('estimasi kasar, bukan audit karbon — simpan setahun')}: ${formatCo2(outcome.co2.storageGrams)}`)
-      lines.push(`${colors.dim('kalau men-download ulang semuanya sekali')}: ${formatCo2(outcome.co2.transferGrams)}`)
+      lines.push(`${colors.dim(t('render.stats.co2Storage'))}: ${formatCo2(outcome.co2.storageGrams)}`)
+      lines.push(`${colors.dim(t('render.stats.co2Transfer'))}: ${formatCo2(outcome.co2.transferGrams)}`)
     }
   }
 
   if (outcome.deprecations !== null) {
     // --online focus (§5.4/§8.2): overview + DEPRECATED only
     lines.push('')
-    lines.push(`━━━ ${colors.bold('DEPRECATED')} ━━━`)
+    lines.push(`━━━ ${colors.bold(t('render.section.deprecated'))} ━━━`)
     const { count, refs } = outcome.deprecations
     if (count === 0) {
-      lines.push(colors.dim('tidak ada paket deprecated ☀️'))
+      lines.push(colors.dim(t('render.stats.deprecatedNone')))
     } else {
-      lines.push(`${count} instance deprecated:`)
+      lines.push(t('render.stats.deprecatedCount', { count }))
       const shown = refs.slice(0, 10)
       for (const ref of shown) {
         const note = ref.message && ref.message.length > 0 ? ` — ${ref.message}` : ''
         const tag = ref.source === 'registry' ? colors.dim(' [registry]') : ''
         lines.push(`${colors.yellow(`${ref.name}${ref.version ? `@${ref.version}` : ''}`)}${tag}  ${ref.displayPath}${note}`)
       }
-      if (refs.length > shown.length) lines.push(colors.dim(`…dan ${refs.length - shown.length} lainnya`))
+      if (refs.length > shown.length) lines.push(colors.dim(t('render.stats.moreDeprecations', { n: refs.length - shown.length })))
     }
   }
 
@@ -583,25 +587,25 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
     // --graph focus (PRD §8.2 v0.6): lockfile-grade dependency graph per entry
     lines.push('')
     lines.push(
-      `━━━ ${colors.bold('GRAPH')} ━━━ ${colors.dim(outcome.graph.fullEntries === outcome.graph.totalEntries ? '(lockfile-grade)' : `${colors.yellow(`${outcome.graph.fullEntries}/${outcome.graph.totalEntries}`)} lockfile-grade — sisanya manifest-grade`)}`,
+      `━━━ ${colors.bold(t('render.section.graph'))} ━━━ ${colors.dim(outcome.graph.fullEntries === outcome.graph.totalEntries ? t('render.stats.lockfileGrade') : `${colors.yellow(`${outcome.graph.fullEntries}/${outcome.graph.totalEntries}`)} ${t('render.stats.graphSuffix')}`)}`,
     )
     lines.push(
-      `root direct   : ${outcome.graph.rootDirect} declared → ${outcome.graph.nodes} tree nodes via ${outcome.graph.edges} edges`,
+      t('render.stats.graphRoot', { declared: outcome.graph.rootDirect, nodes: outcome.graph.nodes, edges: outcome.graph.edges }),
     )
     if (outcome.graph.depthHistogram.length === 0) {
-      lines.push(colors.dim('tidak ada kedalaman yang bisa dilacak dari root — bisa jadi lockfile ini v1/pecah'))
+      lines.push(colors.dim(t('render.stats.graphNoDepth')))
     }
     for (const bucket of outcome.graph.depthHistogram) {
       const filled = Math.max(1, Math.min(20, bucket.packages))
       lines.push(`depth ${String(bucket.depth).padStart(2)}    : ${'█'.repeat(filled).padEnd(20)} ${bucket.packages}`)
     }
     if (outcome.graph.unreachable > 0) {
-      lines.push(colors.dim(`+ ${outcome.graph.unreachable} node(s) unreachable from the root (optional/peer pruning)`))
+      lines.push(colors.dim(t('render.stats.graphUnreachable', { n: outcome.graph.unreachable })))
     }
     for (const row of outcome.graph.entries) {
       const detail = row.grade === 'full'
         ? `${row.file} · ${row.nodes} nodes · ${row.edges} edges · direct ${row.rootDirect}`
-        : colors.dim('no usable lockfile — manifest-grade')
+        : colors.dim(t('render.stats.noLockfile'))
       lines.push(`· ${row.displayPath}  ${colors.dim(row.pm)} ${detail}`)
     }
   }
@@ -609,8 +613,8 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   if (outcome.reinstall !== null) {
     // --reinstall focus (§8.2 v0.6): naive npm ci-style estimate
     lines.push('')
-    lines.push(`━━━ ${colors.bold('REINSTALL')} ━━━ ${colors.dim('(naif)')}`)
-    lines.push(`pasang ulang semuanya sekali : ~${formatDuration(outcome.reinstall.seconds)}`)
+    lines.push(`━━━ ${colors.bold(t('render.section.reinstall'))} ━━━ ${colors.dim(t('render.stats.reinstallNaive'))}`)
+    lines.push(t('render.stats.reinstallLine', { duration: formatDuration(outcome.reinstall.seconds) }))
     lines.push(colors.dim(`· ${outcome.reinstall.formula}`))
   }
 
@@ -629,13 +633,13 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   const top = options.by === 'type' || focused ? [] : outcome.sizeGroups.slice(0, options.topN)
   if (top.length > 0) {
     lines.push('')
-    lines.push(`━━━ ${colors.bold(`TOP ${options.topN} SIZE`)} ━━━`)
+    lines.push(`━━━ ${colors.bold(t('render.section.top', { n: options.topN }))} ━━━`)
     top.forEach((group, index) => {
       const rank = String(index + 1).padStart(2)
-      const copies = group.copies > 1 ? colors.yellow(`×${group.copies} copies`) : dim('×1 copy')
+      const copies = group.copies > 1 ? colors.yellow(t('render.stats.copies', { n: group.copies })) : dim(t('render.stats.oneCopy'))
       const saving =
         group.dedupableSize !== undefined
-          ? dim(`   ← dedup bisa hemat ${formatBytes(group.dedupableSize)}`)
+          ? dim(t('render.stats.dedupSaving', { size: formatBytes(group.dedupableSize) }))
           : ''
       lines.push(`${rank}. ${group.name}  ${copies}  ${formatBytes(group.totalSize)}${saving}`)
     })
@@ -644,23 +648,23 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
       const restCount = rest.reduce((sum, group) => sum + group.copies, 0)
       const restSize = rest.reduce((sum, group) => sum + group.totalSize, 0)
       lines.push('')
-      lines.push(`━━━ ${colors.bold('LONG TAIL')} ━━━`)
-      lines.push(dim(`… plus ${rest.length} more package name(s) · ${restCount} instances · ${formatBytes(restSize)}`))
+      lines.push(`━━━ ${colors.bold(t('render.section.longTail'))} ━━━`)
+      lines.push(dim(t('render.stats.longTail', { names: rest.length, instances: restCount, size: formatBytes(restSize) })))
     }
   }
 
   if (!focused && outcome.dedupSuggestions.length > 0) {
     lines.push('')
-    lines.push(`━━━ ${colors.bold('DEDUP SUGGESTION')} ━━━`)
+    lines.push(`━━━ ${colors.bold(t('render.section.dedup'))} ━━━`)
     outcome.dedupSuggestions.forEach((suggestion, index) => {
       const rank = String(index + 1).padStart(2)
       const version = suggestion.version !== null ? `@${suggestion.version}` : ''
-      lines.push(`${rank}. ${colors.bold(suggestion.name + version)}  ${dim(`×${suggestion.instances.length} copies`)}  ${colors.yellow(signedBytes(suggestion.save))}${dim(' bisa hemat')}`)
+      lines.push(`${rank}. ${colors.bold(suggestion.name + version)}  ${dim(t('render.stats.copies', { n: suggestion.instances.length }))}  ${colors.yellow(signedBytes(suggestion.save))}${dim(t('render.stats.bisaHemat'))}`)
       for (const inst of suggestion.instances) {
         const declared =
           inst.projectName !== null && inst.declaredRange !== null
-            ? `${inst.projectName} declared ${inst.declaredRange} (${inst.declaredField})`
-            : 'transitive (tidak dideklarasi di manifest)'
+            ? t('render.stats.declaredRange', { project: inst.projectName, range: inst.declaredRange, field: inst.declaredField ?? 'null' })
+            : t('render.stats.transitive')
         lines.push(`    · ${inst.displayPath} (${inst.pm}) · ${formatBytes(inst.size ?? 0)} · ${declared}`)
       }
       lines.push(`    ${dim(`↳ ${suggestion.hint}`)}`)
@@ -668,7 +672,7 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   }
 
   if (outcome.permissionIssues.length > 0) {
-    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`))
+    lines.push(colors.yellow(t('render.warn.permission', { n: outcome.permissionIssues.length })))
   }
   return lines.join('\n')
 }
@@ -728,56 +732,56 @@ export function renderStatsJson(
 
 export function renderGlobalReport(outcome: GlobalOutcome, request: { cwd: string }): string {
   const lines: string[] = []
-  lines.push(colors.cyan('🌐 nmh stats — global installation analysis'))
-  lines.push(colors.dim('(⚠️ global mode — read-only; needs access to the PM prefixes — sudo is never auto-applied)'))
+  lines.push(colors.cyan(t('render.global.title')))
+  lines.push(colors.dim(t('render.global.readonly')))
   lines.push('')
   const attempted = ['npm', 'pnpm', 'yarn', 'bun']
-  lines.push(`PM detected      : ${outcome.reports.map((report) => report.pm).join(', ') || '—'}${skippedSuffix(outcome, attempted)}`)
-  lines.push(`Total global     : ${outcome.totals.packages} packages — ${formatBytes(outcome.totals.size)}`)
+  lines.push(t('render.global.pmDetected', { pms: outcome.reports.map((report) => report.pm).join(', ') || '—', skipped: skippedSuffix(outcome, attempted) }))
+  lines.push(t('render.global.total', { count: outcome.totals.packages, size: formatBytes(outcome.totals.size) }))
   lines.push('')
 
   for (const report of outcome.reports) {
     lines.push(colors.bold(`${report.pm} · ${shortenPath(report.root, request.cwd)}`))
     lines.push(globalPackageTable(report, outcome.duplicates))
     if (report.dead.length > 0) {
-      lines.push(colors.yellow(`⚠ dead globals in ${report.pm}: ${report.dead.length} (broken/missing bin symlink)`))
+      lines.push(colors.yellow(t('render.global.dead', { pm: report.pm, count: report.dead.length })))
       for (const dead of report.dead.slice(0, 5)) {
         lines.push(colors.yellow(`  - ${dead.name} → ${dead.detail} (${dead.kind})`))
       }
-      if (report.dead.length > 5) lines.push(colors.yellow(`  … plus ${report.dead.length - 5} more`))
+      if (report.dead.length > 5) lines.push(colors.yellow(t('render.global.more', { n: report.dead.length - 5 })))
     }
     lines.push('')
   }
 
   if (outcome.duplicates.length > 0) {
     const savings = outcome.duplicates.reduce((sum, dup) => sum + dup.savings, 0)
-    lines.push(colors.yellow(`⚠ Cross-PM duplicates : ${outcome.duplicates.length} package(s) (~${formatBytes(savings)} could be saved — uninstall one of them)`))
+    lines.push(colors.yellow(t('render.global.crossDup', { count: outcome.duplicates.length, size: formatBytes(savings) })))
     for (const dup of outcome.duplicates.slice(0, 8)) {
       lines.push(`  - ${dup.name}: ${dup.pms.join(' + ')}`)
     }
-    if (outcome.duplicates.length > 8) lines.push(`  … plus ${outcome.duplicates.length - 8} more`)
+    if (outcome.duplicates.length > 8) lines.push(t('render.global.more', { n: outcome.duplicates.length - 8 }))
     lines.push('')
   }
   if (outcome.permissionIssues.length > 0) {
-    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} unreadable location(s) — exit code 4`))
+    lines.push(colors.yellow(t('render.global.unreadable', { count: outcome.permissionIssues.length })))
   }
   return lines.join('\n')
 }
 
 function skippedSuffix(outcome: GlobalOutcome, attempted: string[]): string {
   const skipped = attempted.filter((pm) => !outcome.reports.some((report) => report.pm === pm))
-  return skipped.length > 0 ? colors.dim(`  (not found: ${skipped.join(', ')})`) : ''
+  return skipped.length > 0 ? colors.dim(t('render.global.notFound', { list: skipped.join(', ') })) : ''
 }
 
 function globalPackageTable(report: GlobalPmReport, duplicates: GlobalDuplicate[]): string {
   const table = new Table({
-    head: [colors.dim('Package'), colors.dim('Version'), colors.dim('Size'), colors.dim('PM')],
+    head: [colors.dim(t('render.global.head.package')), colors.dim(t('render.global.head.version')), colors.dim(t('common.size')), colors.dim(t('common.pm'))],
     style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
   const dupNames = new Set(duplicates.map((dup) => dup.name))
   for (const pkg of report.packages) {
     table.push([
-      colors.bold(pkg.name) + (dupNames.has(pkg.name) ? colors.dim(' ← in more than one PM') : ''),
+      colors.bold(pkg.name) + (dupNames.has(pkg.name) ? colors.dim(t('render.global.multiPm')) : ''),
       pkg.version ?? '—',
       formatBytes(pkg.size ?? 0),
       report.pm,
@@ -827,26 +831,26 @@ const signedBytes = (n: number): string => (n > 0 ? '+' : n < 0 ? '−' : '±') 
 
 export function renderBaselineCompare(comp: BaselineComparison): string {
   const lines: string[] = []
-  lines.push(`━━━ ${colors.bold('BASELINE COMPARE')} ━━━`)
-  lines.push(`Baseline         : '${comp.baselineName}' saved ${comp.baselineCreatedAt}`)
+  lines.push(`━━━ ${colors.bold(t('render.section.baseline'))} ━━━`)
+  lines.push(t('render.baseline.saved', { name: comp.baselineName, date: comp.baselineCreatedAt }))
   const pct =
     comp.totalDeltaPercent === null ? '' : ` (${comp.totalDeltaPercent > 0 ? '+' : comp.totalDeltaPercent < 0 ? '−' : '±'}${Math.abs(comp.totalDeltaPercent)}%)`
-  lines.push(`Total size       : ${signedBytes(comp.totalDelta)}${pct} — was ${formatBytes(comp.totalBefore)}, now ${formatBytes(comp.totalAfter)}`)
-  lines.push(`Packages         : ${signedBytes(comp.packagesDelta)}`)
+  lines.push(t('render.baseline.totalSize', { delta: signedBytes(comp.totalDelta), pct, before: formatBytes(comp.totalBefore), after: formatBytes(comp.totalAfter) }))
+  lines.push(t('render.baseline.packages', { delta: signedBytes(comp.packagesDelta) }))
 
   const changed = comp.deltas.filter((delta) => delta.kind !== 'same')
   if (changed.length > 0) {
     lines.push('')
     const table = new Table({
-      head: [colors.dim('Path'), colors.dim('Before'), colors.dim('Now'), colors.dim('Δ')],
+      head: [colors.dim(t('common.path')), colors.dim(t('render.baseline.headBefore')), colors.dim(t('render.baseline.headNow')), colors.dim(t('render.baseline.headDelta'))],
       style: { head: [], border: colorEnabled() ? ['gray'] : [] },
     })
     for (const delta of changed.slice(0, 15)) {
       const marker =
         delta.kind === 'new'
-          ? colors.yellow('new')
+          ? colors.yellow(t('render.baseline.new'))
           : delta.kind === 'gone'
-            ? colors.dim('gone')
+            ? colors.dim(t('render.baseline.gone'))
             : ''
       table.push([
         marker ? `${delta.rel} ${marker}` : delta.rel,
@@ -857,13 +861,13 @@ export function renderBaselineCompare(comp: BaselineComparison): string {
     }
     lines.push(table.toString())
     if (changed.length > 15) {
-      lines.push(colors.dim(`… plus ${changed.length - 15} more changed path(s)`))
+      lines.push(colors.dim(t('render.baseline.moreChanged', { n: changed.length - 15 })))
     }
   }
 
   if (comp.packageMovers.length > 0) {
     lines.push('')
-    lines.push(`Package movers   :`)
+    lines.push(t('render.baseline.movers'))
     comp.packageMovers.slice(0, 5).forEach((mover, index) => {
       const rank = String(index + 1).padStart(2)
       const delta = mover.delta >= 0 ? colors.yellow(signedBytes(mover.delta)) : signedBytes(mover.delta)
@@ -872,25 +876,25 @@ export function renderBaselineCompare(comp: BaselineComparison): string {
   }
 
   if (Math.abs(comp.totalDelta) > 0 && comp.totalBefore > 0 && comp.totalDeltaPercent !== null && comp.totalDeltaPercent > 30) {
-    lines.push(colors.yellow('🚨 bloat growth detected — node_modules grew by more than 30% since the baseline'))
+    lines.push(colors.yellow(t('render.baseline.bloatGrowth')))
   }
   return lines.join('\n')
 }
 
 export function renderBaselineHistory(items: BaselineListItem[], cwd: string): string {
   const lines: string[] = []
-  lines.push(colors.cyan(`⚖ nmh baselines — ${items.length} saved`))
+  lines.push(colors.cyan(t('render.baselineHistory.title', { count: items.length })))
   if (items.length === 0) {
-    lines.push(colors.dim('save one with: nmh stats --save-baseline <name>'))
+    lines.push(colors.dim(t('render.baselineHistory.saveHint')))
     return lines.join('\n')
   }
   const table = new Table({
-    head: [colors.dim('Name'), colors.dim('Saved'), colors.dim('Size'), colors.dim('Node_modules'), colors.dim('Where')],
+    head: [colors.dim(t('render.baselineHistory.head.name')), colors.dim(t('render.baselineHistory.head.saved')), colors.dim(t('common.size')), colors.dim(t('render.baselineHistory.head.modules')), colors.dim(t('render.baselineHistory.head.where'))],
     style: { head: [], border: colorEnabled() ? ['gray'] : [] },
   })
   for (const item of items) {
     table.push([
-      item.name + (item.cwd === cwd ? colors.yellow(' · this dir') : ''),
+      item.name + (item.cwd === cwd ? colors.yellow(t('render.baselineHistory.thisDir')) : ''),
       item.createdAt.replace('T', ' ').replace(/\..*/, '').replace(/Z$/, ''),
       formatBytes(item.totals.size ?? 0),
       String(item.totals.folders ?? 0),
@@ -903,36 +907,36 @@ export function renderBaselineHistory(items: BaselineListItem[], cwd: string): s
 
 export function renderWhyReport(outcome: WhyOutcome, options: { cwd: string; expand?: boolean }): string {
   const lines: string[] = []
-  lines.push(colors.cyan(`🔍 why '${outcome.pkg}' — ${outcome.instances.length} instance(s)`))
+  lines.push(colors.cyan(t('render.why.title', { pkg: outcome.pkg, count: outcome.instances.length })))
   for (const instance of outcome.instances) {
     lines.push('')
     const version = instance.version !== null ? `@${instance.version}` : ''
     const linked = instance.symlinked
-    const size = linked ? colors.dim('linked') : formatBytes(instance.size ?? 0)
+    const size = linked ? colors.dim(t('render.why.linked')) : formatBytes(instance.size ?? 0)
     lines.push(`${colors.bold(instance.displayPath)} · ${colors.bold(outcome.pkg + version)} · ${size}${instance.pm !== 'unknown' ? colors.dim(` · ${instance.pm}`) : ''}`)
     if (instance.declaredBy !== null) {
-      lines.push(`  project              : ${instance.declaredBy.projectName ?? '(manifest tanpa nama)'} declares ${colors.yellow(instance.declaredBy.range)} (${instance.declaredBy.field})`)
+      lines.push(t('render.why.declares', { project: instance.declaredBy.projectName ?? t('render.why.noName'), range: colors.yellow(instance.declaredBy.range), field: instance.declaredBy.field }))
     } else {
-      lines.push(colors.dim('  project              : transitive — tidak dideklarasi di manifest manapun'))
+      lines.push(colors.dim(t('render.why.transitive')))
     }
     if (instance.requiredBy.length > 0) {
-      const gradeTag = instance.requiredByGrade === 'lockfile' ? colors.dim(' (lockfile-grade)') : ''
-      lines.push(`  required by          : ${instance.requiredBy.length} package(s)${gradeTag}`)
+      const gradeTag = instance.requiredByGrade === 'lockfile' ? colors.dim(` ${t('render.stats.lockfileGrade')}`) : ''
+      lines.push(t('render.why.requiredBy', { count: instance.requiredBy.length }) + gradeTag)
       for (const req of instance.requiredBy.slice(0, 10)) {
         const reqVersion = req.version !== null ? `@${req.version}` : ''
         lines.push(`    · ${req.name}${reqVersion} → ${req.range} (${req.field})`)
       }
       if (instance.requiredBy.length > 10) {
-        lines.push(colors.dim(`    … plus ${instance.requiredBy.length - 10} more requirer(s)`))
+        lines.push(colors.dim(t('render.why.moreRequirers', { n: instance.requiredBy.length - 10 })))
       }
     } else if (instance.requiredByGrade === 'lockfile') {
-      lines.push(colors.dim('  required by          : no package in the lockfile graph depends on it (root-only copy?)'))
+      lines.push(colors.dim(t('render.why.rootOnly')))
     } else {
-      lines.push(colors.dim('  required by          : no package manifest names it — orphan copy'))
+      lines.push(colors.dim(t('render.why.orphan')))
     }
   }
   if (outcome.permissionIssues.length > 0) {
-    lines.push(colors.yellow(`⚠ ${outcome.permissionIssues.length} directory(ies) unreadable (permission denied) — exit code 4`))
+    lines.push(colors.yellow(t('render.warn.permission', { n: outcome.permissionIssues.length })))
   }
   return lines.join('\n')
 }
@@ -954,22 +958,22 @@ export function renderWhyJson(outcome: WhyOutcome, _request: { cwd: string }): s
 
 export function renderDepsAudit(audit: DepsAudit, focus: 'phantom' | 'dead' | 'both'): string {
   const lines: string[] = []
-  lines.push(`━━━ ${colors.bold('DEPS AUDIT')} ━━━`)
-  lines.push(colors.dim(`· best-effort regex scan — ${audit.scannedFiles} source file(s) (real graph: nmh stats --graph)`))
+  lines.push(`━━━ ${colors.bold(t('render.section.audit'))} ━━━`)
+  lines.push(colors.dim(t('render.audit.disclaimer', { count: audit.scannedFiles })))
   const showPhantom = focus === 'phantom' || focus === 'both'
   const showDead = focus === 'dead' || focus === 'both'
   if (showPhantom && audit.phantom.length === 0 && showDead && audit.dead.length === 0) {
-    lines.push(colors.green('✓ no phantom imports and no dead declarations detected'))
+    lines.push(colors.green(t('render.audit.clean')))
   }
   if (showPhantom && audit.phantom.length > 0) {
-    lines.push(`🧟 phantom imports — imported in code, declared nowhere (${audit.phantom.length})`)
+    lines.push(t('render.audit.phantom', { count: audit.phantom.length }))
     for (const hit of audit.phantom) {
       const sites = hit.sites.length > 0 ? colors.dim(` — ${hit.sites.join(', ')}`) : ''
       lines.push(`  · ${colors.bold(hit.name)}${sites}`)
     }
   }
   if (showDead && audit.dead.length > 0) {
-    lines.push(`🪦 dead declarations — installed + declared, never imported (${audit.dead.length})`)
+    lines.push(t('render.audit.dead', { count: audit.dead.length }))
     for (const hit of audit.dead) {
       lines.push(`  · ${colors.bold(hit.name)} — ${hit.declaringProjects.join(', ')}`)
     }

@@ -347,7 +347,8 @@ import type { DepsAudit } from './deps-audit.ts'
 export interface GlobalBinIssue {
   /** package that declares the bin */
   name: string
-  kind: 'broken bin symlink' | 'missing bin symlink'
+  /** i18n label (v1.3) — a human phrase, no longer a closed union */
+  kind: string
   /** bin name (file name inside the PM's bin dir) */
   detail: string
 }

@@ -20,6 +20,7 @@ import { collectScan } from './scan.ts'
 import { listTopLevelPackages, projectDepsFor, projectNameFor, depSpecFor, readPackageJson, licenseOf, deprecatedOf, createDepClassifier, isCopyleftLicense, type DepSpec } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderMapTree, renderStatsJson, renderStatsReport, renderBaselineCompare, renderBaselineHistory } from '../core/render.ts'
+import { t } from '../i18n/index.ts'
 import { registryDeprecated, registryDeprecatedCacheDir, MAX_REGISTRY_DEPRECATED_FETCHES } from '../utils/registry-deprecated.ts'
 import type { BloatScore, Co2Estimate, DeprecatedRef, DeprecationsOutcome, DedupInstanceDetail, DedupSuggestion, GraphEntryRow, GraphOutcome, MapPackageRef, MapProjectInfo, ReinstallEstimate, StatsLicenseRow, StatsOutcome, StatsPackageGroup, StatsTypeBreakdown, StatsOverview } from '../core/result.ts'
 
@@ -116,7 +117,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
           ),
         )
         measuredEntries += 1
-        spinUpdate(`analyzing ${measuredEntries}/${entryCount} node_modules…`)
+        spinUpdate(t('stats.spin.progress', { done: measuredEntries, total: entryCount }))
         const graph = request.graph === true
           ? await readProjectLockGraph(declared?.projectDir ?? path.dirname(entry.path))
           : undefined
@@ -231,7 +232,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
   let code = 0
   if (projectsResults.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
-  verboseLog(`stats: ${projectsResults.length} entries, ${instances} instances, ${unique} unique`)
+  verboseLog(t('verbose.statsSummary', { entries: projectsResults.length, instances, unique }))
   return { code, projects: projectsResults, overview, sizeGroups, dedupSuggestions, typeBreakdown, licenseBreakdown, graph, score, co2, reinstall, deprecations, depsAudit: requestedAudit ? depsAudit : null, permissionIssues: scan.result.permissionIssues }
 }
 
@@ -536,16 +537,16 @@ async function buildSuggestions(members: Map<string, Map<string, MemberRef[]>>):
 function dedupHint(instances: DedupInstanceDetail[]): string {
   const declared = instances.filter((inst) => inst.declaredRange !== null)
   if (declared.length === 0) {
-    return 'copies resolusinya ikut parent masing-masing — tidak ada knob langsung di project level'
+    return t('stats.hint.noDeclared')
   }
   const ranges = [...new Set(declared.map((inst) => inst.declaredRange))].filter((range) => range !== null)
   if (ranges.length === 1) {
-    const tail = ` (declared ${ranges[0]})`
+    const tail = t('stats.hint.tail', { range: ranges[0] })
     return instances.some((inst) => inst.pm === 'pnpm')
-      ? `range declared identik — pnpm virtual store melipat copy hoisted; cukup satu versi di workspace root${tail}`
-      : `range declared identik — jalankan install ulang / npm dedupe · yarn dedupe melipat copy hoisted${tail}`
+      ? t('stats.hint.pnpm', { tail })
+      : t('stats.hint.sameRange', { tail })
   }
-  return `range declared beda (${ranges.join(' vs ')}) — samakan dulu di package.json, lalu install ulang`
+  return t('stats.hint.diffRanges', { ranges: ranges.join(' vs ') })
 }
 
 /** Stats + print (report / tree / JSON), with optional baseline save/compare/history (PRD §8.3). */
@@ -566,22 +567,23 @@ export async function runStats(request: StatsRequest): Promise<number> {
   let baseForCompare: BaselineSnapshot | null = null
   if (request.saveBaseline !== undefined) {
     if (!validateBaselineName(request.saveBaseline)) {
-      errorLog(`invalid baseline name: '${request.saveBaseline}' (expected letters/digits/._-, max 64)`)
+      errorLog(t('cli.err.invalidBaseline', { name: request.saveBaseline }))
       return 1
     }
   }
   if (request.compareBaseline !== undefined) {
     if (!validateBaselineName(request.compareBaseline)) {
-      errorLog(`invalid baseline name: '${request.compareBaseline}' (expected letters/digits/._-, max 64)`)
+      errorLog(t('cli.err.invalidBaseline', { name: request.compareBaseline }))
       return 1
     }
     baseForCompare = await loadBaseline(request.compareBaseline)
     if (baseForCompare === null) {
       const names = (await listBaselines()).map((item) => item.name)
       errorLog(
-        `no baseline named '${request.compareBaseline}' — ${
-          names.length > 0 ? `saved: ${names.join(', ')}` : 'save one first with nmh stats --save-baseline <name>'
-        }`,
+        t('stats.err.noBaseline', {
+          name: request.compareBaseline,
+          detail: names.length > 0 ? t('stats.err.baselinesSaved', { list: names.join(', ') }) : t('stats.err.saveFirst'),
+        }),
       )
       return 1
     }
@@ -595,17 +597,17 @@ export async function runStats(request: StatsRequest): Promise<number> {
     let savedFile: string | null = null
     if (request.saveBaseline !== undefined) {
       savedFile = await saveBaselineQuiet(request.saveBaseline, fresh)
-      if (savedFile !== null) note(`💾 baseline saved → ${request.saveBaseline} (empty snapshot — no node_modules yet)`)
+      if (savedFile !== null) note(t('stats.note.savedEmpty', { name: request.saveBaseline }))
     }
     if (request.compareBaseline !== undefined) {
-      warn(`nothing to compare — no node_modules scanned; baseline '${request.compareBaseline}' kept as-is`)
+      warn(t('stats.warn.nothingToCompare', { name: request.compareBaseline }))
     }
     if (request.json) {
       const baselineExtra = { saved: savedFile !== null ? { name: request.saveBaseline!, createdAt: fresh.createdAt, file: savedFile } : undefined, compare: null }
       payload(renderStatsJson(outcome, request, { baseline: baselineExtra }))
       return 2
     }
-    warn('no node_modules found — nothing to analyze here 🙃')
+    warn(t('stats.warn.none'))
     return 2
   }
 
@@ -615,7 +617,7 @@ export async function runStats(request: StatsRequest): Promise<number> {
   let savedFile: string | null = null
   if (request.saveBaseline !== undefined) {
     savedFile = await saveBaselineQuiet(request.saveBaseline, fresh)
-    if (savedFile !== null) note(`💾 baseline saved → ${request.saveBaseline}`)
+    if (savedFile !== null) note(t('stats.note.saved', { name: request.saveBaseline }))
   }
 
   if (request.json) {
@@ -664,7 +666,7 @@ async function saveBaselineQuiet(name: string, snapshot: BaselineSnapshot): Prom
   try {
     return await saveBaseline(name, snapshot)
   } catch (err) {
-    warn(`could not save baseline '${name}': ${err instanceof Error ? err.message : String(err)}`)
+    warn(t('stats.err.saveFailed', { name, detail: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }

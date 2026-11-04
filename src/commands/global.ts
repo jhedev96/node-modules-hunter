@@ -9,6 +9,7 @@ import { spinUpdate, spinClear, warn, verboseLog, log, payload } from '../utils/
 import { readPackageJson, listTopLevelPackages, packageVersion } from '../core/packages.ts'
 import { measureEntry } from '../core/sizer.ts'
 import { renderGlobalJson, renderGlobalReport } from '../core/render.ts'
+import { t } from '../i18n/index.ts'
 import type { GlobalBinIssue, GlobalPackageInfo, GlobalPmReport, GlobalOutcome } from '../core/result.ts'
 
 const execFileAsync = promisify(execFile)
@@ -116,10 +117,10 @@ export async function inspectDeadBins(
         try {
           await fs.stat(link) // follows the target once: broken/missing → dead
         } catch {
-          issues.push({ name: ref.name, kind: 'broken bin symlink', detail: binName })
+          issues.push({ name: ref.name, kind: t('global.deadKind.broken'), detail: binName })
         }
       } catch {
-        issues.push({ name: ref.name, kind: 'missing bin symlink', detail: binName })
+        issues.push({ name: ref.name, kind: t('global.deadKind.missing'), detail: binName })
       }
     }
   }
@@ -153,7 +154,7 @@ async function resolvePmRoots(pmFilter: string[] | undefined): Promise<Array<{ p
     else if (pm === 'yarn') spec = await probeRoot('yarn', ['global', 'dir'], (dir) => ({ root: path.join(dir, 'node_modules'), binDir: path.join(dir, 'bin'), source: 'pm' }), yarnFallback)
     else if (pm === 'bun') spec = await probeRoot('bun', ['pm', '-g'], (dir) => ({ root: dir, binDir: path.join(path.dirname(path.dirname(dir)), 'bin'), source: 'pm' }), bunFallback)
     if (spec) results.push({ pm, spec })
-    else verboseLog(`global: ${pm} — no global node_modules found`)
+    else verboseLog(t('verbose.globalNone', { pm }))
   }
   return results
 }
@@ -174,7 +175,7 @@ async function pnpmFallbackSpec(): Promise<RootSpec | null> {
 }
 
 export async function runGlobal(request: GlobalRequest): Promise<number> {
-  spinUpdate('probing global prefixes…')
+  spinUpdate(t('global.spin.probe'))
 
   const pmRoots = await resolvePmRoots(request.pmFilter)
   const reports: GlobalPmReport[] = []
@@ -192,7 +193,7 @@ export async function runGlobal(request: GlobalRequest): Promise<number> {
             ref.symlinked ? Promise.resolve(null) : measureEntry(ref.path),
           ])
           done += 1
-          spinUpdate(`global ${pm} — ${done}/${refs.length} packages`)
+          spinUpdate(t('global.spin.progress', { pm, done, total: refs.length }))
           return { name: ref.name, version, symlinked: ref.symlinked, size: measure === null ? null : measure.size }
         }),
       ),
@@ -241,7 +242,7 @@ export async function runGlobal(request: GlobalRequest): Promise<number> {
 
 function finish(request: GlobalRequest, outcome: GlobalOutcome): number {
   if (outcome.reports.length === 0) {
-    warn('no global install roots found — nothing to analyze here 🌐🙃')
+    warn(t('global.warn.none'))
     if (request.json) {
       payload(renderGlobalJson(outcome, request))
       return 2

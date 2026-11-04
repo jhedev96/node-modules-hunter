@@ -2,6 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { isRootPath, realpathSafe } from '../utils/paths.ts'
+import { t } from '../i18n/index.ts'
 
 export type GuardCode = 'root' | 'home' | 'name' | 'symlink-loop' | 'not-found' | 'not-directory'
 
@@ -17,23 +18,23 @@ export async function checkDeleteTarget(candidate: string): Promise<GuardVerdict
     (value) => value,
     () => null,
   )
-  if (!st) return verdict('not-found', 'path does not exist')
-  if (!st.isDirectory() && !st.isSymbolicLink()) return verdict('not-directory', 'not a directory')
+  if (!st) return verdict('not-found', t('guard.reason.notFound'))
+  if (!st.isDirectory() && !st.isSymbolicLink()) return verdict('not-directory', t('guard.reason.notDirectory'))
 
   const real = await realpathSafe(candidate)
-  if (!real) return verdict('symlink-loop', 'cannot resolve real path (symlink loop?)')
+  if (!real) return verdict('symlink-loop', t('guard.reason.symlinkLoop'))
 
   if (path.basename(candidate) !== 'node_modules') {
-    return verdict('name', `refusing: folder is not named node_modules (${path.basename(candidate)})`)
+    return verdict('name', t('guard.reason.name', { name: path.basename(candidate) }))
   }
-  if (isRootPath(real)) return verdict('root', 'refusing: target is a filesystem root')
-  if (isHome(real)) return verdict('home', 'refusing: target is the user home directory')
+  if (isRootPath(real)) return verdict('root', t('guard.reason.root'))
+  if (isHome(real)) return verdict('home', t('guard.reason.home'))
   // v0.9 audit hardening: a node_modules SITTING DIRECTLY inside / or $HOME is
   // structural damage territory (think `home/node_modules` drifting packages) — same risk
   // class as deleting $HOME itself, so it refuses as well.
   const parent = path.dirname(real)
-  if (isRootPath(parent)) return verdict('root', 'refusing: node_modules directly inside the filesystem root')
-  if (isHome(parent)) return verdict('home', 'refusing: node_modules directly inside the home directory')
+  if (isRootPath(parent)) return verdict('root', t('guard.reason.rootParent'))
+  if (isHome(parent)) return verdict('home', t('guard.reason.homeParent'))
 
   return { safe: true }
 }
@@ -64,7 +65,7 @@ export async function partitionTargets(candidates: string[]): Promise<Partitione
 }
 
 export function describeGuard(verdict: GuardVerdict): string {
-  return verdict.reason ?? verdict.code ?? 'unsafe target'
+  return verdict.reason ?? verdict.code ?? t('guard.reason.unsafe')
 }
 
 function verdict(code: GuardCode, reason: string): GuardVerdict {

@@ -12,6 +12,7 @@ import { renderScanResult } from '../core/render.ts'
 import { errorLog, log, warn, colors, isTTYOut, payload } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { renderFullBanner, renderCompactBanner } from '../utils/banner.ts'
+import { t } from '../i18n/index.ts'
 import type { DeleteMode, ScanEntry } from '../core/result.ts'
 import type { NmhConfig } from '../utils/config.ts'
 
@@ -124,7 +125,7 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
   const explicit = options.targets !== undefined && options.targets.length > 0
   const scope = explicit ? { root: cwd, from: cwd, climbed: false, scouted: false } : await resolveWizardScope(cwd)
   if (!options.json && scope.climbed) {
-    warn(`no node_modules within 3 levels of cwd — scoped to the project root above: ${scope.root}`)
+    warn(t('wizard.warn.climbed', { root: scope.root }))
   }
   const outcome = await collectScan({
     targets: wizardTargets(options),
@@ -137,12 +138,12 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
     if (options.json) payload(renderScanResult(outcome.result, { cwd: scope.root, json: true, sizeMode: 'each' }))
     else log(renderScanResult(outcome.result, { cwd: scope.root, json: false, sizeMode: 'each' }))
   } else {
-    warn('no node_modules found in this folder')
+    warn(t('wizard.warn.noneHere'))
     if (!options.json && scope.scouted) {
-      warn('project ancestors were scouted too (≤8 hops up) — no node_modules anywhere')
+      warn(t('wizard.warn.scouted'))
     }
   }
-  warn('the interactive wizard needs a TTY — this was a plain read-only scan; every menu action exists as a command: see nmh --help')
+  warn(t('wizard.warn.needsTty'))
   return outcome.code
 }
 
@@ -156,7 +157,7 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
   if (options.banner !== false) log(renderFullBanner())
   const scope = explicit ? { root: cwd, from: cwd, climbed: false, scouted: false } : await resolveWizardScope(cwd)
   if (scope.climbed) {
-    log(colors.dim(`cwd has no node_modules in 3 levels — scoped up to the project root ${scope.root}`))
+    log(colors.dim(t('wizard.info.scopedUp', { root: scope.root })))
   }
 
   for (;;) {
@@ -169,25 +170,25 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
     })
     const entries = scan.result.entries
     if (entries.length === 0) {
-      outro('nothing found 🙃')
+      outro(t('wizard.outro.nothingFound'))
       return scan.result.permissionIssues.length > 0 ? 4 : 2
     }
 
     const totalSize = sum(entries)
     const choice = await select({
-      message: `${entries.length} node_modules found in this tree — ${formatBytes(totalSize)} · next move?`,
+      message: t('wizard.menu.message', { count: entries.length, size: formatBytes(totalSize) }),
       options: [
-        { value: 'delete-all', label: '🗑️  Delete everything found (guards, mode & confirm included)' },
-        { value: 'pick', label: '☑️  Pick manually — checkboxes (space to select)' },
-        { value: 'search', label: '🔍  Search installed packages by pattern' },
-        { value: 'map', label: '🗺️  Map dependencies — project → PM → declared deps' },
-        { value: 'stats', label: '📊  Detailed report — the full stats read-out' },
-        { value: 'settings', label: '⚙️  Settings & integration (read-only view)' },
-        { value: 'quit', label: '⏹  Exit nmh' },
+        { value: 'delete-all', label: t('wizard.menu.deleteAll') },
+        { value: 'pick', label: t('wizard.menu.pick') },
+        { value: 'search', label: t('wizard.menu.search') },
+        { value: 'map', label: t('wizard.menu.map') },
+        { value: 'stats', label: t('wizard.menu.stats') },
+        { value: 'settings', label: t('wizard.menu.settings') },
+        { value: 'quit', label: t('wizard.menu.quit') },
       ],
     })
     if (isCancel(choice) || choice === 'quit') {
-      outro('bye 👋 — nothing deleted')
+      outro(t('wizard.outro.bye'))
       return 0
     }
 
@@ -198,12 +199,12 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
         return deleteFlow('pick', entries, options)
       case 'search': {
         const pattern = await text({
-          message: 'Search installed packages — which pattern?',
+          message: t('wizard.search.message'),
           placeholder: 'e.g. lodash, react-dom, es*build, /react(-dom)?/i',
-          validate: (value) => (value.trim().length === 0 ? 'give a pattern — substring, glob, or /regex/' : undefined),
+          validate: (value) => (value.trim().length === 0 ? t('wizard.search.validate') : undefined),
         })
         if (isCancel(pattern)) {
-          warn('search skipped — back to the menu')
+          warn(t('wizard.search.skipped'))
           continue
         }
         await runSearch({ pattern: String(pattern).trim(), targets: wizardTargets(options), cwd: scope.root, maxDepth: WIZARD_DEPTH })
@@ -234,14 +235,14 @@ async function deleteFlow(
   // Guards run before anything is offered (blocked victims are surfaced, not hidden silently).
   const { safe, blocked } = await partitionTargets(entries.map((entry) => entry.path))
   for (const item of blocked) {
-    errorLog(`🛑 ${item.path} — ${describeGuard(item.verdict)} (excluded from wizard)`)
+    errorLog(t('wizard.guard.blocked', { path: item.path, reason: describeGuard(item.verdict) }))
   }
   const safeSet = new Set(safe)
   const selectable = entries.filter((entry) => safeSet.has(entry.path))
   const selectableSet = new Map(selectable.map((entry) => [entry.path, entry] as const))
 
   if (selectable.length === 0) {
-    outro('nothing safe to select — done')
+    outro(t('wizard.outro.nothingSafe'))
     return 3
   }
 
@@ -250,7 +251,7 @@ async function deleteFlow(
     selected = selectable
   } else {
     const picked = await multiselect({
-      message: `${selectable.length} node_modules — ${formatBytes(sum(selectable))} found · space to select, enter to continue`,
+      message: t('wizard.pick.message', { count: selectable.length, size: formatBytes(sum(selectable)) }),
       options: selectable.map((entry) => ({
         value: entry.path,
         label: `${formatBytes(entry.size)} · ${entry.displayPath}${entry.pm.family === 'unknown' ? '' : colors.dim(`  · ${entry.pm.family}`)}`,
@@ -258,41 +259,41 @@ async function deleteFlow(
       required: true,
     })
     if (isCancel(picked)) {
-      outro('cancelled — nothing deleted')
+      outro(t('delete.cancelled'))
       return 0
     }
     selected = (picked as string[])
       .map((path_) => selectableSet.get(path_))
       .filter((entry): entry is ScanEntry => entry !== undefined)
     if (selected.length === 0) {
-      outro('nothing selected — bye 👋')
+      outro(t('wizard.outro.nothingSelected'))
       return 0
     }
   }
 
   const mode = await pickDeleteMode(options.defaultMode)
   if (mode === null) {
-    outro('cancelled — nothing deleted')
+    outro(t('delete.cancelled'))
     return 0
   }
 
   const admitted = await confirm({
     message:
       mode === 'hard'
-        ? `Delete ${selected.length} folder(s) — ${formatBytes(sum(selected))} — PERMANENTLY (no undo)?`
-        : `Move ${selected.length} folder(s) — ${formatBytes(sum(selected))} — to the OS trash?`,
+        ? t('delete.confirm.hard', { count: selected.length, size: formatBytes(sum(selected)) })
+        : t('delete.confirm.trash', { count: selected.length, size: formatBytes(sum(selected)) }),
     initialValue: mode !== 'hard',
   })
   if (isCancel(admitted) || admitted === false) {
-    outro('cancelled — nothing deleted')
+    outro(t('delete.cancelled'))
     return 0
   }
 
   const result = await executeAll(selected, { mode, json: false, quietSummary: true })
   outro(
     result.outcome.failed > 0
-      ? `${colors.yellow('⚠')} done with ${result.outcome.failed} failure(s) — freed ${formatBytes(result.outcome.freed)}`
-      : `${colors.green('✅')} Freed: ${formatBytes(result.outcome.freed)} from ${result.outcome.deleted} folder(s)`,
+      ? t('wizard.outro.failures', { icon: colors.yellow('⚠'), n: result.outcome.failed, size: formatBytes(result.outcome.freed) })
+      : t('wizard.outro.freed', { icon: colors.green('✅'), size: formatBytes(result.outcome.freed), count: result.outcome.deleted }),
   )
   return result.code
 }
@@ -300,10 +301,10 @@ async function deleteFlow(
 /** Trash pre-selected as the safe default (PRD decision #2); hard demands the loud confirm later. */
 async function pickDeleteMode(defaultMode?: DeleteMode): Promise<DeleteMode | null> {
   const modeChoice = await select({
-    message: 'How should these die?',
+    message: t('wizard.mode.message'),
     options: [
-      { value: 'trash', label: 'Move to OS trash — safe & restorable (recommended)' },
-      { value: 'hard', label: 'Delete permanently — there is no undo' },
+      { value: 'trash', label: t('wizard.mode.trash') },
+      { value: 'hard', label: t('wizard.mode.hard') },
     ],
     initialValue: defaultMode ?? 'trash',
   })
@@ -314,23 +315,23 @@ async function pickDeleteMode(defaultMode?: DeleteMode): Promise<DeleteMode | nu
 function renderSettings(settings: WizardSettings | undefined, scope: WizardScope): string {
   const values = settings?.values ?? {}
   const row = (key: string, value: string): string => `${colors.dim(key.padEnd(12, ' '))}${value}`
-  const list = (items?: string[]): string => (items === undefined || items.length === 0 ? '(none)' : `${items.length}: ${items.join(', ')}`)
+  const list = (items?: string[]): string => (items === undefined || items.length === 0 ? t('wizard.settings.none') : t('wizard.settings.list', { n: items.length, list: items.join(', ') }))
   return [
     '',
-    colors.bold('⚙  settings & integration'),
-    row('cwd', scope.climbed ? `${scope.from} → scoped up to ${scope.root}` : scope.from),
-    row('config', settings?.source ?? 'none found (.nmhrc in cwd → home)'),
-    row('defaultMode', values.defaultMode ?? 'trash (wizard keeps it safe by default)'),
-    row('depth', values.depth !== undefined ? String(values.depth) : 'default 3 here — flag --depth <n> overrides'),
-    row('animate', values.animate === undefined ? 'auto (TTY on)' : String(values.animate)),
-    row('color', values.color === undefined ? 'auto (TTY on)' : String(values.color)),
-    row('updateCheck', values.updateCheck === undefined ? 'off — opt-in via --update-check' : String(values.updateCheck)),
+    colors.bold(t('wizard.settings.title')),
+    row('cwd', scope.climbed ? t('wizard.settings.cwdClimbed', { from: scope.from, root: scope.root }) : scope.from),
+    row('config', settings?.source ?? t('wizard.settings.noConfig')),
+    row('defaultMode', values.defaultMode ?? t('wizard.settings.defaultMode')),
+    row('depth', values.depth !== undefined ? String(values.depth) : t('wizard.settings.depth')),
+    row('animate', values.animate === undefined ? t('wizard.settings.auto') : String(values.animate)),
+    row('color', values.color === undefined ? t('wizard.settings.auto') : String(values.color)),
+    row('updateCheck', values.updateCheck === undefined ? t('wizard.settings.updateCheckOff') : String(values.updateCheck)),
     row('exclude', list(values.exclude)),
     row('keep', list(values.keep)),
-    row('logDir', values.logDir ?? '~/.nmh (delete receipts)'),
+    row('logDir', values.logDir ?? t('wizard.settings.logDir')),
     '',
-    colors.dim('change with nmh config (set·add·remove·unset) or .nmhrc — README §10 ·'),
-    colors.dim('this whole menu also exists as plain commands: nmh clean · nmh search <pattern> · nmh map · nmh stats'),
+    colors.dim(t('wizard.settings.changeHint')),
+    colors.dim(t('wizard.settings.commandsHint')),
   ].join('\n')
 }
 

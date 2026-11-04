@@ -1,5 +1,6 @@
 import { colors } from './logger.ts'
 import { toolVersion } from './version.ts'
+import { t } from '../i18n/index.ts'
 
 /**
  * Terminal cell width, counting emoji as 2 cells (the common terminal behavior).
@@ -32,12 +33,12 @@ export function renderFullBanner(): string {
   return [
     border('╭', '╮'),
     row('🐉 nmh · node_modules hunter', `🐉 ${colors.bold('nmh')} · node_modules hunter`, version, colors.dim(version)),
-    row('scan · measure · clean — safety rails on', colors.dim('scan · measure · clean — safety rails on'), '', ''),
+    row(t('banner.tagline'), colors.dim(t('banner.tagline')), '', ''),
     border('╰', '╯'),
   ].join('\n')
 }
 
 /** One quiet line for non-TTY runs — visible context, zero box-drawing noise in pipes. */
 export function renderCompactBanner(): string {
-  return `${colors.magenta('🐉')} ${colors.bold('node-modules-hunter')} v${toolVersion()} — read-only scan`
+  return `${colors.magenta('🐉')} ${colors.bold('node-modules-hunter')} v${toolVersion()} — ${t('banner.compact')}`
 }

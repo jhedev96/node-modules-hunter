@@ -4,6 +4,7 @@
  * squarified treemap layout (Bruls et al.). Hover shows path+size; the data itself
  * is embedded as JSON — the file stays self-contained (no external fetches ever).
  */
+import { t } from '../i18n/index.ts'
 
 export interface TreemapPackage {
   name: string
@@ -157,7 +158,7 @@ export function buildTreemapLayout(data: TreemapData, width = 1280, height = 720
     const usable = inset(rect, 16)
     const cells = squarify(
       entry.packages.map((pkg, pkgIndex) => ({
-        label: `${pkg.name}${pkg.version ? `@${pkg.version}` : ''}${pkg.symlinked ? ' ⟶link' : ''}`,
+        label: `${pkg.name}${pkg.version ? `@${pkg.version}` : ''}${pkg.symlinked ? t('treemap.link') : ''}`,
         weight: pkg.symlinked || pkg.size === null ? 0.6 : Math.max(pkg.size, 1),
         pkgIndex,
       })),
@@ -235,8 +236,8 @@ export function renderTreemapHtml(data: TreemapData, width = 1280, height = 720)
 </style>
 </head>
 <body>
-<header>nmh treemap — ${entriesLine} — ${data.entries.length} node_modules — hover buat detail disk, generated ${esc(data.generatedAt)}</header>
-<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="treemap ukuran node_modules">
+<header>${esc(t('treemap.html.header', { entries: entriesLine, count: data.entries.length, at: data.generatedAt }))}</header>
+<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(t('treemap.html.aria'))}">
 ${rects.join('\n')}
 </svg>
 <div id="tip"></div>

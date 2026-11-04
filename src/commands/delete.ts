@@ -8,6 +8,7 @@ import { writeDeleteLog } from '../utils/delete-log.ts'
 import { spinUpdate, spinClear, errorLog, isSilent, isTTYOut, log, warn, payload } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { toolVersion } from '../utils/version.ts'
+import { t } from '../i18n/index.ts'
 import type { DeleteMode, DeleteOutcome, DeleteOutcomeRow, ScanEntry } from '../core/result.ts'
 
 export interface DeleteFlowRequest {
@@ -60,7 +61,7 @@ export async function executeAll(
     mode: request.mode,
     trashMode: request.trashMode,
     onRow: (_row: DeleteOutcomeRow, done: number, total: number) => {
-      spinUpdate(`🗑  ${done}/${total} folders…`)
+      spinUpdate(t('delete.spin.progress', { done, total }))
     },
   })
   spinClear()
@@ -73,9 +74,9 @@ export async function executeAll(
     // stderr side-channels keep stdout clean for tables; --json carries the same data.
     if (outcome.trashBatch !== undefined) {
       if (outcome.trashFallback === true) {
-        note(`no OS trash backend (install gio or trash-cli) — fell back to the restorable nmh trash: ${outcome.trashBatch}`)
+        note(t('delete.note.trashFallback', { batch: outcome.trashBatch }))
       } else {
-        note(`restorable nmh trash: ${outcome.trashBatch} (manifest: manifest.jsonl — restore by moving folders back)`)
+        note(t('delete.note.trashBatch', { batch: outcome.trashBatch }))
       }
     }
   }
@@ -115,19 +116,19 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
   // Unresolvable user targets are an explicit guard case (PRD §6.3 symlink loops first-class).
   if (scan.result.unresolvable.length > 0) {
     for (const suspect of scan.result.unresolvable) {
-      errorLog(`🛑 ${shortenPath(suspect, request.cwd)} — refusing: cannot resolve real path (symlink loop?)`)
+      errorLog(t('delete.guard.unresolvable', { path: shortenPath(suspect, request.cwd) }))
     }
     if (request.blockedMode !== 'filter') {
-      errorLog('delete aborted — safety guard refused; nothing was deleted (exit 3)')
+      errorLog(t('delete.guard.abort'))
       return 3
     }
-    warn(`${scan.result.unresolvable.length} unresolvable target(s) skipped`)
+    warn(t('delete.warn.unresolvableSkipped', { n: scan.result.unresolvable.length }))
   }
 
   const all = scan.result.entries
 
   if (all.length === 0) {
-    if (!request.json) warn('no node_modules found — nothing to hunt here 🙃')
+    if (!request.json) warn(t('scan.warn.none'))
     return scan.result.permissionIssues.length > 0 ? 4 : 2
   }
 
@@ -137,13 +138,13 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
 
   if (blocked.length > 0) {
     for (const item of blocked) {
-      errorLog(`🛑 ${shortenPath(item.path, request.cwd)} — ${describeGuard(item.verdict)}`)
+      errorLog(t('delete.guard.blocked', { path: shortenPath(item.path, request.cwd), reason: describeGuard(item.verdict) }))
     }
     if (request.blockedMode !== 'filter') {
-      errorLog('delete aborted — safety guard refused; nothing was deleted (exit 3)')
+      errorLog(t('delete.guard.abort'))
       return 3
     }
-    warn(`${blocked.length} target(s) skipped by safety guard — continuing with the safe ones`)
+    warn(t('delete.warn.guardSkipped', { n: blocked.length }))
   }
 
   if (safeEntries.length === 0) return 2
@@ -163,7 +164,7 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
   if (request.json && !request.assumeYes) {
     // v0.9.2: TTY no longer exempts --json — machine output has no interactive prompt slot,
     // so a TTY --json run used to hard-delete with zero confirmation. --yes is the only door.
-    warn('--json deletes require an explicit --yes (or --force) — there is no interactive confirm inside --json; nothing was deleted')
+    warn(t('delete.warn.jsonNeedsYes'))
     return 1
   }
 
@@ -174,13 +175,13 @@ export async function deleteFlow(request: DeleteFlowRequest): Promise<number> {
 
   if (!request.assumeYes) {
     if (!isTTYOut()) {
-      warn('non-interactive shell — nothing deleted without --yes (tip: --dry-run previews first)')
-      log(renderPlan(safeEntries, mode, { maxShown: 10 }).replace('[DRY RUN]', '[NOT EXECUTED]'))
+      warn(t('delete.warn.nonInteractive'))
+      log(renderPlan(safeEntries, mode, { maxShown: 10, dryRun: false }))
       return 1
     }
     const admitted = await confirmDeletion(safeEntries.length, totalSize, mode)
     if (admitted !== true) {
-      if (!isSilent()) log('cancelled — nothing deleted')
+      if (!isSilent()) log(t('delete.cancelled'))
       return 0
     }
   }
@@ -197,15 +198,15 @@ async function resolveMode(
   if (requested) return requested
   if (json) return 'trash' // JSON callers are scripts; pick the safe default, never prompt
   if (!isTTYOut()) {
-    errorLog('--delete without a value needs an interactive terminal — pass hard | soft | trash (soft = trash)')
+    errorLog(t('cli.err.deleteNeedsTty'))
     return null
   }
   if (!dryRun) {
     const choice = await select({
-      message: 'Deletion mode:',
+      message: t('delete.select.mode'),
       options: [
-        { value: 'trash', label: 'trash — move to OS bin (safe, restorable) · recommended' },
-        { value: 'hard', label: 'hard — delete permanently · no undo' },
+        { value: 'trash', label: t('delete.select.trash') },
+        { value: 'hard', label: t('delete.select.hard') },
       ],
       initialValue: 'trash',
     })
@@ -219,8 +220,8 @@ async function confirmDeletion(count: number, size: number, mode: DeleteMode): P
   const answer = await confirm({
     message:
       mode === 'hard'
-        ? `Delete ${count} folder(s) — ${formatBytes(size)} — PERMANENTLY (no undo)?`
-        : `Move ${count} folder(s) — ${formatBytes(size)} — to the OS trash?`,
+        ? t('delete.confirm.hard', { count, size: formatBytes(size) })
+        : t('delete.confirm.trash', { count, size: formatBytes(size) }),
     initialValue: mode !== 'hard',
   })
   return answer === true

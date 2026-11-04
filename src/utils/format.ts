@@ -1,3 +1,5 @@
+import { t } from '../i18n/index.ts'
+
 /** Format a byte count as a human string — 1024-based, one decimal (PRD §11). */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -14,7 +16,7 @@ export function formatBytes(bytes: number): string {
 /** Idle days for the scan IDLE column (v1.1): now / 3d / 90d / 2,190d — '—' without a signal. */
 export function formatIdle(days: number | undefined): string {
   if (days === undefined) return '—'
-  if (days === 0) return 'now'
+  if (days === 0) return t('format.now')
   return `${days.toLocaleString('en-US')}d`
 }
 
@@ -25,14 +27,14 @@ export function formatAge(mtimeMs: number | null, now = Date.now()): string {
   const minute = 60_000
   const hour = 60 * minute
   const day = 24 * hour
-  if (diff < minute) return 'now'
-  if (diff < hour) return `${Math.floor(diff / minute)}m ago`
-  if (diff < day) return `${Math.floor(diff / hour)}h ago`
+  if (diff < minute) return t('format.now')
+  if (diff < hour) return t('format.ago', { n: `${Math.floor(diff / minute)}m` })
+  if (diff < day) return t('format.ago', { n: `${Math.floor(diff / hour)}h` })
   const days = Math.floor(diff / day)
-  if (days < 60) return `${days}d ago`
+  if (days < 60) return t('format.ago', { n: `${days}d` })
   const months = Math.floor(days / 30)
-  if (months < 24) return `${months}mo ago`
-  return `${Math.floor(days / 365)}y ago`
+  if (months < 24) return t('format.ago', { n: `${months}mo` })
+  return t('format.ago', { n: `${Math.floor(days / 365)}y` })
 }
 
 const ANSI_ESCAPE = /\u001b\[[0-9;]*[A-Za-z]/g

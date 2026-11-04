@@ -13,6 +13,7 @@ import {
   renderMapTree,
 } from '../core/render.ts'
 import type { MapOutcome } from '../core/result.ts'
+import { t } from '../i18n/index.ts'
 
 export interface MapRequest {
   targets: string[]
@@ -81,7 +82,7 @@ export async function collectMap(request: MapRequest): Promise<MapOutcome> {
           ),
         )
         mapped += 1
-        spinUpdate(`mapping ${mapped}/${entryCount} projects…`)
+        spinUpdate(t('map.spin.progress', { done: mapped, total: entryCount }))
         return { entry, project, topPackages, declared }
       }),
     ),
@@ -91,7 +92,7 @@ export async function collectMap(request: MapRequest): Promise<MapOutcome> {
   let code = 0
   if (projects.length === 0) code = 2
   else if (scan.result.permissionIssues.length > 0) code = 4
-  verboseLog(`map: ${projects.length} project(s)`)
+  verboseLog(t('verbose.mapProjects', { n: projects.length }))
   return { code, projects, permissionIssues: scan.result.permissionIssues }
 }
 
@@ -119,11 +120,11 @@ export async function runMap(request: MapRequest): Promise<number> {
   }
 
   if (outcome.projects.length === 0) {
-    warn('no node_modules found — nothing to map here 🙃')
+    warn(t('map.warn.none'))
     return 2
   }
   if (projects.length === 0) {
-    warn(`no project declares '${request.dependPkg}' in its manifest 🙃`)
+    warn(t('map.warn.notDeclared', { pkg: String(request.dependPkg ?? '') }))
     return 2
   }
 

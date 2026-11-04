@@ -3,6 +3,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { toolVersion } from './version.ts'
 import { verboseLog } from './logger.ts'
+import { t } from '../i18n/index.ts'
 
 /** npm's latest-release JSON shape (only the fields this check reads). */
 interface RegistryLatest {
@@ -44,7 +45,7 @@ export function isNewer(current: string, latest: string): boolean {
 }
 
 export function updateNote(latest: string, current: string): string {
-  return `update tersedia: ${current} → ${latest} — npm i -g node-modules-hunter (cek 24 jam sekali, opt-in via --update-check)`
+  return t('update.note', { current, latest })
 }
 
 async function readFreshCache(): Promise<string | null> {
@@ -66,7 +67,7 @@ async function writeCache(latest: string): Promise<void> {
     await fs.mkdir(path.dirname(cacheFile()), { recursive: true })
     await fs.writeFile(cacheFile(), `${JSON.stringify(entry, null, 2)}\n`, 'utf8')
   } catch (err) {
-    verboseLog(`update-cache write failed: ${err instanceof Error ? err.message : String(err)}`)
+    verboseLog(t('verbose.updateCacheWriteFailed', { detail: err instanceof Error ? err.message : String(err) }))
   }
 }
 
@@ -93,7 +94,7 @@ export async function checkForUpdate(): Promise<string | null> {
     if (latest === null) return null
     return isNewer(toolVersion(), latest) ? updateNote(latest, toolVersion()) : null
   } catch (err) {
-    verboseLog(`update check failed: ${err instanceof Error ? err.message : String(err)}`)
+    verboseLog(t('verbose.updateCheckFailed', { detail: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }
@@ -102,14 +103,14 @@ async function fetchLatest(): Promise<string | null> {
   try {
     const response = await fetch(registryUrl(), { signal: AbortSignal.timeout(4000) })
     if (!response.ok) {
-      verboseLog(`update check: registry responded ${response.status}`)
+      verboseLog(t('verbose.updateRegistryStatus', { status: response.status }))
       return null
     }
     const latest = parseLatestVersion(await response.json())
     if (latest !== null) await writeCache(latest)
     return latest
   } catch (err) {
-    verboseLog(`update check: registry unreachable (${err instanceof Error ? err.message : String(err)})`)
+    verboseLog(t('verbose.updateRegistryUnreachable', { detail: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }

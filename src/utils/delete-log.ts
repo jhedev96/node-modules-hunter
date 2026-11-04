@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { verboseLog } from './logger.ts'
 import { toolVersion } from './version.ts'
 import { expandTilde } from './paths.ts'
+import { t } from '../i18n/index.ts'
 import type { DeleteMode, DeleteOutcomeRow } from '../core/result.ts'
 
 /** Overridden by `logDir` in .nmhrc (see cli.ts); empty = default ~/.nmh/logs. */
@@ -55,7 +56,7 @@ export async function writeDeleteLog(payload: DeleteLogPayload): Promise<string 
     await fs.writeFile(file, JSON.stringify(body, null, 2))
     return file
   } catch (err) {
-    verboseLog(`delete log unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    verboseLog(t('verbose.deleteLogUnavailable', { detail: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }

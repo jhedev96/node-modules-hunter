@@ -2,6 +2,7 @@ import { cac } from 'cac'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { configureLogger, errorLog, warn, verboseLog, note, isTTYOut, log } from './utils/logger.ts'
+import { setLocale, resolveLocale, isLocale, t } from './i18n/index.ts'
 import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
 import { printHelp } from './utils/help.ts'
@@ -87,6 +88,7 @@ cli.option('--default-exclude <globs>', 'config family: manage the persisted exc
 cli.option('--default-keep <pkgs>', 'config family: manage the persisted keep list (comma list; special value "self")')
 cli.option('--default-mode <mode>', 'config family: set the persisted defaultMode (hard | soft | trash)')
 cli.option('--log-dir <dir>', 'config family: set the persisted recovery-log directory (logDir)')
+cli.option('--language <lang>', 'UI language: en | id | zh | ru | es (also in .nmhrc / NMH_LANG; v1.3)')
 
 const PM_FAMILIES = new Set(['npm', 'pnpm', 'yarn', 'bun', 'vp'])
 
@@ -175,6 +177,20 @@ async function runCli(userArgs: string[]): Promise<number> {
   const flags = parsed.options as Record<string, unknown>
   const positionals = (parsed.args ?? []).filter((token): token is string => typeof token === 'string')
 
+  // i18n (v1.3): the CLI flag and the process env resolve FIRST (the config file is not
+  // read yet); the loud rejection covers the flag only — env values silently fall back.
+  // Pre-resolution output (early version/help, config load errors) renders English.
+  const langFlag = typeof flags.language === 'string' && flags.language.length > 0 ? flags.language : undefined
+  if (typeof flags.language === 'string' && flags.language.length === 0) {
+    errorLog(t('cli.err.languageNeedsValue'))
+    return 1
+  }
+  if (langFlag !== undefined && !isLocale(langFlag.trim().toLowerCase())) {
+    errorLog(t('cli.err.invalidLanguage', { value: langFlag }))
+    return 1
+  }
+  setLocale(resolveLocale(langFlag, process.env.NMH_LANG, process.env.LC_ALL, process.env.LANG))
+
   // run:false → built-ins handled manually for deterministic exit codes
   if (flags.version === true) {
     printVersion(flags.json === true)
@@ -188,7 +204,7 @@ async function runCli(userArgs: string[]): Promise<number> {
   // .nmhrc (PRD §10): loaded before anything reads its values; explicit --config replaces the lookup
   const explicitConfig = typeof flags.config === 'string' && flags.config.length > 0 ? flags.config : null
   if (explicitConfig === null && flags.config !== undefined && flags.config !== false) {
-    errorLog('--config needs a file path — nmh --config <file> …')
+    errorLog(t('cli.err.configNeedsPath'))
     return 1
   }
   let config: Partial<NmhConfig> = {}
@@ -197,7 +213,7 @@ async function runCli(userArgs: string[]): Promise<number> {
     const loaded = await loadConfig(explicitConfig, process.cwd())
     config = loaded.values
     configSource = loaded.source
-    if (loaded.source !== null) verboseLog(`config: ${loaded.source}`)
+    if (loaded.source !== null) verboseLog(t('cli.verbose.configSource', { file: loaded.source }))
   } catch (err) {
     if (err instanceof ConfigError) {
       // `nmh config` manages the file itself: a to-be-created --config target only exists
@@ -207,12 +223,15 @@ async function runCli(userArgs: string[]): Promise<number> {
         errorLog(err.message)
         return 1
       }
-      verboseLog('config: read-phase lookup skipped for the config family')
+      verboseLog(t('cli.verbose.configFamilySkip'))
     } else {
       throw err
     }
   }
   if (config.logDir !== undefined) setLogDirectory(config.logDir)
+
+  // i18n (v1.3): the config file sits above the env in the chain — re-resolve with it.
+  setLocale(resolveLocale(langFlag, config.language, process.env.NMH_LANG, process.env.LC_ALL, process.env.LANG))
 
   // cac defaults the --no-color negation to color:true even when nobody passed it,
   // so "explicit --color on the CLI" is detected from argv, not from flags.color.
@@ -252,7 +271,7 @@ async function runCli(userArgs: string[]): Promise<number> {
   }
 
   for (const future of detectFutureFlags(Object.keys(flags))) {
-    warn(`${future} lands in a later version (v0.2+) — ignored for now`)
+    warn(t('cli.warn.futureFlag', { flag: future }))
   }
 
   let sizeMode: 'each' | 'total' = 'each'
@@ -260,18 +279,18 @@ async function runCli(userArgs: string[]): Promise<number> {
     if (flags.size === 'total') sizeMode = 'total'
     else if (flags.size === 'each') sizeMode = 'each'
     else if (/^\d+$/.test(flags.size)) {
-      warn('--size <n> (top-N list) lands in a later version — listing every folder for now')
+      warn(t('cli.warn.sizeTopN'))
     } else {
-      errorLog(`invalid --size: ${flags.size} (expected 'total' or 'each')`)
+      errorLog(t('cli.err.invalidSize', { value: flags.size }))
       return 1
     }
   } else if (flags.size === true) {
     // v0.9.2: a value-less --size used to fall through silently (rc 0, default mode) —
     // every sibling guard (--pm/--depth/--delete) refuses loud
-    errorLog("--size needs a value — use --size=total or --size=each (a bare --size doesn't select a mode)")
+    errorLog(t('cli.err.sizeNeedsValue'))
     return 1
   } else if (Array.isArray(flags.size)) {
-    errorLog('--size given more than once — pass a single value (total | each)')
+    errorLog(t('cli.err.sizeTwice'))
     return 1
   }
 
@@ -279,16 +298,16 @@ async function runCli(userArgs: string[]): Promise<number> {
   let stale: number | undefined
   if (flags.stale !== undefined) {
     if (flags.stale === true) {
-      errorLog('--stale needs a value — use --stale=<days> (e.g. --stale=90)')
+      errorLog(t('cli.err.staleNeedsValue'))
       return 1
     }
     if (Array.isArray(flags.stale)) {
-      errorLog('--stale given more than once — pass a single value (days)')
+      errorLog(t('cli.err.staleTwice'))
       return 1
     }
     const days = Number(flags.stale)
     if (!Number.isInteger(days) || days < 1 || days > 365_000) {
-      errorLog(`invalid --stale: ${String(flags.stale)} (expected a positive whole number of days)`)
+      errorLog(t('cli.err.invalidStale', { value: String(flags.stale) }))
       return 1
     }
     stale = days
@@ -301,16 +320,16 @@ async function runCli(userArgs: string[]): Promise<number> {
   let sort: 'size' | 'path' | 'idle' | 'mtime' | undefined
   if (flags.sort !== undefined) {
     if (flags.sort === true) {
-      errorLog('--sort needs a value — use --sort=size | path | idle | mtime')
+      errorLog(t('cli.err.sortNeedsValue'))
       return 1
     }
     if (Array.isArray(flags.sort)) {
-      errorLog('--sort given more than once — pass a single key')
+      errorLog(t('cli.err.sortTwice'))
       return 1
     }
     const key = String(flags.sort)
     if (key !== 'size' && key !== 'path' && key !== 'idle' && key !== 'mtime') {
-      errorLog(`invalid --sort: ${key} (expected size | path | idle | mtime)`)
+      errorLog(t('cli.err.invalidSort', { key }))
       return 1
     }
     sort = key
@@ -326,16 +345,16 @@ async function runCli(userArgs: string[]): Promise<number> {
   let trashMode: 'system' | 'nmh' | undefined
   if (flags.trash !== undefined) {
     if (flags.trash === true) {
-      errorLog('--trash needs a value — use --trash=system or --trash=nmh')
+      errorLog(t('cli.err.trashNeedsValue'))
       return 1
     }
     if (Array.isArray(flags.trash)) {
-      errorLog('--trash given more than once — pass a single mode')
+      errorLog(t('cli.err.trashTwice'))
       return 1
     }
     const mode = String(flags.trash)
     if (mode !== 'system' && mode !== 'nmh') {
-      errorLog(`invalid --trash: ${mode} (expected system | nmh)`)
+      errorLog(t('cli.err.invalidTrash', { mode }))
       return 1
     }
     trashMode = mode
@@ -343,18 +362,18 @@ async function runCli(userArgs: string[]): Promise<number> {
 
   const deleted = normalizeDelete(flags.delete)
   if (deleted === 'invalid') {
-    errorLog(`invalid --delete: ${String(flags.delete)} (expected 'hard' | 'soft' | 'trash')`)
+    errorLog(t('cli.err.invalidDelete', { value: String(flags.delete) }))
     return 1
   }
   // .nmhrc defaultMode fills in a bare `--delete` (no explicit mode on the CLI)
   if (deleted.mode === null && deleted.given && config.defaultMode !== undefined) {
     deleted.mode = config.defaultMode
-    verboseLog(`delete mode from .nmhrc: ${deleted.mode}`)
+    verboseLog(t('cli.verbose.deleteModeFromRc', { mode: deleted.mode }))
   }
 
   const pm = normalizePm(flags.pm)
   if (pm === 'invalid') {
-    errorLog(`invalid --pm: ${String(flags.pm)} (expected npm | pnpm | yarn | bun | vp)`)
+    errorLog(t('cli.err.invalidPm', { value: String(flags.pm) }))
     return 1
   }
 
@@ -365,9 +384,9 @@ async function runCli(userArgs: string[]): Promise<number> {
     if (positionals[0] !== 'config') {
       // cac swallows `--depth -2` (the bare flag loses its value) — say so instead of printing `true`
       if (flags.depth === true) {
-        errorLog('--depth needs a non-negative integer — use --depth=<n> (e.g. --depth=2)')
+        errorLog(t('cli.err.depthNeedsValue'))
       } else {
-        errorLog(`invalid --depth: ${String(flags.depth)} (expected a non-negative integer)`)
+        errorLog(t('cli.err.invalidDepth', { value: String(flags.depth) }))
       }
       return 1
     }
@@ -387,42 +406,42 @@ async function runCli(userArgs: string[]): Promise<number> {
   let reportPath: string | null = null
   if (typeof flags.saveReport === 'string' && flags.saveReport.length > 0) reportPath = flags.saveReport
   else if (flags.saveReport === true) {
-    errorLog('--save-report needs a file path (.json/.md/.txt)')
+    errorLog(t('cli.err.saveReportNeedsValue'))
     return 1
   }
   if (reportPath === null && flags.report !== undefined) {
     if (typeof flags.report === 'string' && flags.report.length > 0) reportPath = flags.report
     else {
-      errorLog('--report needs a file path (.json/.md/.txt)')
+      errorLog(t('cli.err.reportNeedsValue'))
       return 1
     }
   }
   if (reportPath !== null) {
     const ext = path.extname(reportPath).toLowerCase()
     if (!(REPORT_EXTENSIONS as readonly string[]).includes(ext)) {
-      errorLog(`unknown report format: ${reportPath} (expected .json/.md/.txt)`)
+      errorLog(t('cli.err.invalidReportExt', { file: reportPath }))
       return 1
     }
   }
 
   // baseline trio (PRD §8.3): names validated before any scan writes happen
   if (flags.saveBaseline === true) {
-    errorLog('--save-baseline needs a name — nmh stats --save-baseline <name>')
+    errorLog(t('cli.err.baselineNeedsName'))
     return 1
   }
   if (flags.compare === true) {
-    errorLog('--compare needs a name — nmh stats --compare <name>')
+    errorLog(t('cli.err.compareNeedsName'))
     return 1
   }
   const baselineSave = typeof flags.saveBaseline === 'string' ? flags.saveBaseline : null
   const baselineCompare = typeof flags.compare === 'string' ? flags.compare : null
   const baselineHistory = flags.history === true
   if (baselineSave !== null && !validateBaselineName(baselineSave)) {
-    errorLog(`invalid baseline name: '${baselineSave}' (expected letters/digits/._-, max 64)`)
+    errorLog(t('cli.err.invalidBaseline', { name: baselineSave }))
     return 1
   }
   if (baselineCompare !== null && !validateBaselineName(baselineCompare)) {
-    errorLog(`invalid baseline name: '${baselineCompare}' (expected letters/digits/._-, max 64)`)
+    errorLog(t('cli.err.invalidBaseline', { name: baselineCompare }))
     return 1
   }
   const baselineGiven = baselineSave !== null || baselineCompare !== null || baselineHistory
@@ -433,7 +452,7 @@ async function runCli(userArgs: string[]): Promise<number> {
 
   const resolvedSub = resolveSubcommand(positionals, cwd)
   if (resolvedSub.unknown !== null) {
-    errorLog(`unknown command '${resolvedSub.unknown}' — run \`nmh help\` for the command list (paths are passed to \`nmh scan\` or \`--dir\`)`)
+    errorLog(t('cli.err.unknownCommand', { cmd: resolvedSub.unknown }))
     return 1
   }
   const subcommand = resolvedSub.subcommand
@@ -443,19 +462,19 @@ async function runCli(userArgs: string[]): Promise<number> {
 
   // `--pm` without a value is read-only reporting; a delete op needs an actual family to filter by.
   if (pm.given && pm.family === null && (subcommand === 'clean' || deleted.given || globalGiven)) {
-    errorLog('--pm without a value only lists detected PMs — give a family (npm|pnpm|yarn|bun|vp) to filter a delete op or the --global analysis')
+    errorLog(t('cli.err.pmBare'))
     return 1
   }
 
   // --save-report writes scan output; delete/clean runs are not scan reports
   if (reportPath !== null && (deleted.given || subcommand === 'clean')) {
-    errorLog('--save-report rides along with scan — delete/clean runs are not scan reports')
+    errorLog(t('cli.err.reportNotDelete'))
     return 1
   }
 
   // --trash (v1.1) is a delete-op knob — harmless elsewhere, but say so
   if (trashMode !== undefined && !deleted.given && subcommand !== 'clean') {
-    warn('--trash only matters for delete/clean runs — ignored for scans and read-only commands')
+    warn(t('cli.warn.trashOnly'))
   }
 
   // v0.9.4: a delete op aimed at the filesystem root is always a mistake — the scan would
@@ -463,7 +482,7 @@ async function runCli(userArgs: string[]): Promise<number> {
   if (deleted.given || subcommand === 'clean') {
     for (const candidate of targets.length > 0 ? targets : ['']) {
       if (isRootPath(path.resolve(cwd, candidate))) {
-        errorLog('refusing a delete op over the filesystem root — point --dir at the project directory you want cleaned')
+        errorLog(t('cli.err.rootRefusal'))
         return 1
       }
     }
@@ -495,11 +514,11 @@ async function runCli(userArgs: string[]): Promise<number> {
 
   // --check/--info are update-only knobs — anywhere else they are a mistake, say so loud
   if ((flags.check !== undefined && flags.check !== false) && subcommand !== 'update') {
-    errorLog('--check only works with the update command — nmh update --check')
+    errorLog(t('cli.err.checkOnlyUpdate'))
     return 1
   }
   if ((flags.info !== undefined && flags.info !== false) && subcommand !== 'update') {
-    errorLog('--info only works with the update command — nmh update --info')
+    errorLog(t('cli.err.infoOnlyUpdate'))
     return 1
   }
 
@@ -508,11 +527,11 @@ async function runCli(userArgs: string[]): Promise<number> {
   // the ask). No scan/delete flags apply.
   if (subcommand === 'update') {
     if (deleted.given || rest.length > 0) {
-      errorLog('update takes no arguments — plain `nmh update` (add --json for the payload)')
+      errorLog(t('cli.err.updateArgs'))
       return 1
     }
     if (flags.check === true && flags.info === true) {
-      errorLog('--check and --info are two different read-only views — pick one (nmh update --check | --info)')
+      errorLog(t('cli.err.checkInfoExclusive'))
       return 1
     }
     return runUpdate({
@@ -529,14 +548,14 @@ async function runCli(userArgs: string[]): Promise<number> {
   // with directions (the bare `nmh` fallback scan keeps its own non-TTY path below).
   const wizardIntent = subcommand === 'wizard' || flags.wizard === true
   if (routerTokens !== null && !wizardIntent) {
-    errorLog('the `--` router belongs to the wizard — nmh wizard -- stats|map|search|why|treemap …')
+    errorLog(t('cli.err.routerOrphan'))
     return 1
   }
   let routerView: string[] | null = null
   if (routerTokens !== null) {
     const view = routerTokens[0]
     if (typeof view !== 'string' || !WIZARD_VIEWS.has(view)) {
-      errorLog(`unknown wizard view: ${String(view ?? '(empty)')} — the router opens a read-only view: stats (analyze, info) | map | search | why | treemap`)
+      errorLog(t('cli.err.unknownWizardView', { view: String(view ?? '') }))
       return 1
     }
     routerView = routerTokens
@@ -545,15 +564,15 @@ async function runCli(userArgs: string[]): Promise<number> {
     // positional targets are the scan shortcut's syntax — the wizard scopes via --dir only
     // (rest, not positionals: for `nmh wizard …` the command token itself sits in positionals)
     if (rest.length > 0) {
-      errorLog('wizard takes no positional targets — scope it with --dir=./repo1,./repo2 (or `nmh wizard -- <view> …`)')
+      errorLog(t('cli.err.wizardPositional'))
       return 1
     }
     if (deleted.given) {
-      errorLog('--delete does not belong to the wizard — the menu asks for the mode itself')
+      errorLog(t('cli.err.wizardDelete'))
       return 1
     }
     if (!isTTYOut()) {
-      errorLog('the wizard needs a TTY (it is an arrow-key menu) — use nmh scan / --dir / the plain commands instead; bare `nmh` in a pipe stays a read-only scan')
+      errorLog(t('cli.err.wizardNeedsTTY'))
       return 1
     }
     if (routerView !== null) {
@@ -579,15 +598,15 @@ async function runCli(userArgs: string[]): Promise<number> {
     const ops = new Set<ConfigOp>(['info', 'set', 'add', 'remove', 'unset'])
     const opRaw = rest[0]
     if (typeof opRaw !== 'string' || !ops.has(opRaw as ConfigOp)) {
-      errorLog('config needs an op — nmh config info | set | add | remove | unset (take a look: nmh config info)')
+      errorLog(t('cli.err.configOp'))
       return 1
     }
     if (rest.length > 1) {
-      errorLog(`config ${opRaw} takes no positional args — use flags (--default-exclude …, --depth …)`)
+      errorLog(t('cli.err.configPositional', { op: opRaw }))
       return 1
     }
     if (deleted.given) {
-      errorLog('--delete does not belong to nmh config — it manages the .nmhrc file, that is all')
+      errorLog(t('cli.err.configDelete'))
       return 1
     }
     // cac negation pairs (lines 37/53) default to `true` in flags even when untouched —
@@ -615,6 +634,7 @@ async function runCli(userArgs: string[]): Promise<number> {
       animate: animateGiven ? (flags.animate as ConfigCommandRequest['animate']) : undefined,
       color: colorGiven ? (flags.color as ConfigCommandRequest['color']) : undefined,
       updateCheck: flags.updateCheck as ConfigCommandRequest['updateCheck'],
+      language: flags.language as ConfigCommandRequest['language'],
     })
   }
 
@@ -628,16 +648,16 @@ async function runCli(userArgs: string[]): Promise<number> {
   // statsGiven early so read-only flag guards (below) cover every dispatch, not just stats itself.
   const statsGiven = flags.stats === true || subcommand === 'stats' || subcommand === 'analyze' || subcommand === 'info'
   if ((flags.phantom === true || flags.dead === true || flags.licenses === true || flags.score === true || flags.co2 === true || flags.online === true || flags.graph === true || flags.reinstall === true) && !statsGiven) {
-    errorLog('--phantom/--dead/--licenses/--score/--co2/--online/--graph/--reinstall only work with the stats command — nmh stats --reinstall')
+    errorLog(t('cli.err.statsFlagsOnly'))
     return 1
   }
   if (subcommand === 'search' || searchPattern !== null) {
     if (deleted.given || subcommand === 'clean') {
-      errorLog('--search is read-only — combine it with scan, not with delete/clean')
+      errorLog(t('cli.err.searchReadOnly'))
       return 1
     }
     if (searchPattern === null) {
-      errorLog('search needs a pattern — nmh search <pattern> [dirs]')
+      errorLog(t('cli.err.searchNeedsPattern'))
       return 1
     }
     const searchTargets =
@@ -661,16 +681,16 @@ async function runCli(userArgs: string[]): Promise<number> {
   const whyGiven = typeof flags.why === 'string' && flags.why.length > 0
   if (subcommand === 'why' || whyGiven) {
     if (deleted.given || subcommand === 'clean') {
-      errorLog('--why is read-only — combine it with scan, not with delete/clean')
+      errorLog(t('cli.err.whyReadOnly'))
       return 1
     }
     const pkg = subcommand === 'why' ? rest[0] : flags.why
     if (typeof pkg !== 'string' || pkg.length === 0) {
-      errorLog('why needs a package name — nmh why <pkg> [dirs]')
+      errorLog(t('cli.err.whyNeedsPkg'))
       return 1
     }
     if (typeof flags.why === 'string' && subcommand === 'why' && rest.length > 1 && flags.why !== rest[0]) {
-      errorLog(`--why (${flags.why}) conflicts with the why subcommand's package (${rest[0]}) — pick one`)
+      errorLog(t('cli.err.whyConflict', { why: flags.why, pkg: rest[0] }))
       return 1
     }
     const whyTargets = subcommand === 'why' ? [...rest.slice(1), ...dirTargets] : targets
@@ -688,7 +708,7 @@ async function runCli(userArgs: string[]): Promise<number> {
     })
   }
   if (flags.why !== undefined) {
-    errorLog('--why needs a package name — nmh why <pkg> [dirs]')
+    errorLog(t('cli.err.whyFlagNeedsPkg'))
     return 1
   }
 
@@ -697,17 +717,17 @@ async function runCli(userArgs: string[]): Promise<number> {
   const treemapGiven = subcommand === 'treemap' || (flags.treemap !== undefined && flags.treemap !== false)
   if (treemapGiven) {
     if (deleted.given || subcommand === 'clean') {
-      errorLog('--treemap is read-only — combine it with scan, not with delete/clean')
+      errorLog(t('cli.err.treemapReadOnly'))
       return 1
     }
     if (reportPath !== null) {
-      errorLog('--save-report does not work with treemap — the HTML file IS the report (nmh treemap --out <file>)')
+      errorLog(t('cli.err.reportNotTreemap'))
       return 1
     }
     const flagFile = typeof flags.treemap === 'string' ? flags.treemap : null
     const outFlag = typeof flags.out === 'string' && flags.out.length > 0 ? flags.out : null
     if (outFlag === null && flags.out !== undefined) {
-      errorLog('--out needs a file path — nmh treemap --out report.html')
+      errorLog(t('cli.err.outNeedsValue'))
       return 1
     }
     const treemapTargets = subcommand === 'treemap' ? [...rest, ...dirTargets] : targets
@@ -724,7 +744,7 @@ async function runCli(userArgs: string[]): Promise<number> {
     })
   }
   if (flags.out !== undefined) {
-    errorLog('--out only works with the treemap command — nmh treemap --out file.html')
+    errorLog(t('cli.err.outOnlyTreemap'))
     return 1
   }
 
@@ -749,26 +769,26 @@ async function runCli(userArgs: string[]): Promise<number> {
   if (typeof flags.by === 'string') {
     if (flags.by === 'package' || flags.by === 'size' || flags.by === 'type' || flags.by === 'licenses') by = flags.by
     else {
-      errorLog(`invalid --by: ${flags.by} (expected 'package' | 'size' | 'type' | 'licenses')`)
+      errorLog(t('cli.err.invalidBy', { value: flags.by }))
       return 1
     }
   }
 
   if ((treeGiven || dependGiven) && !mapGiven && !statsGiven) {
     if (dependGiven && !treeGiven) {
-      errorLog('--depend only works with the map command — nmh map <dirs> --depend [pkg]')
+      errorLog(t('cli.err.dependOnlyMap'))
     } else {
-      errorLog('--tree works with map or stats, --depend is map-only — nmh map <dirs> --depend [pkg]')
+      errorLog(t('cli.err.treeMapStats'))
     }
     return 1
   }
   if (dependGiven && !mapGiven) {
-    errorLog('--depend only works with the map command — nmh map <dirs> --depend [pkg]')
+    errorLog(t('cli.err.dependOnlyMap'))
     return 1
   }
   if (mapGiven) {
     if (deleted.given || subcommand === 'clean') {
-      errorLog('--map is read-only — combine it with scan, not with delete/clean')
+      errorLog(t('cli.err.mapReadOnly'))
       return 1
     }
     const mapTargets = subcommand === 'map' ? [...rest, ...dirTargets] : targets
@@ -790,22 +810,22 @@ async function runCli(userArgs: string[]): Promise<number> {
   }
 
   if (baselineGiven && !statsGiven) {
-    errorLog('--save-baseline/--compare/--history only work with the stats command — nmh stats --save-baseline <name>')
+    errorLog(t('cli.err.baselineOnlyStats'))
     return 1
   }
   if (statsGiven) {
     if (deleted.given || subcommand === 'clean') {
-      errorLog('--stats is read-only — combine it with scan, not with delete/clean')
+      errorLog(t('cli.err.statsReadOnly'))
       return 1
     }
     if (globalGiven) {
       if (treeGiven || flags.top !== undefined || by !== null || flags.graph === true || flags.reinstall === true) {
-        errorLog('--tree/--top/--by/--graph/--reinstall shape per-project stats — global mode has its own table')
+        errorLog(t('cli.err.globalShapeFlags'))
         return 1
       }
       const globalTargets = [...rest, ...dirTargets]
       if (globalTargets.length > 0) {
-        errorLog('--global analyzes the PM global prefixes — no [dir] needed')
+        errorLog(t('cli.err.globalNoDir'))
         return 1
       }
       return runGlobal({
@@ -815,7 +835,7 @@ async function runCli(userArgs: string[]): Promise<number> {
       })
     }
     if (topN === 'invalid') {
-      errorLog(`invalid --top: ${String(flags.top)} (expected a positive integer)`)
+      errorLog(t('cli.err.invalidTop', { value: String(flags.top) }))
       return 1
     }
     const statsTargets = subcommand ? [...rest, ...dirTargets] : targets
@@ -847,11 +867,11 @@ async function runCli(userArgs: string[]): Promise<number> {
     })
   }
   if (flags.top !== undefined || by !== null) {
-    errorLog('--top/--by only work with the stats command')
+    errorLog(t('cli.err.topByStats'))
     return 1
   }
   if (globalGiven) {
-    errorLog('--global only works with the stats command — nmh stats -g')
+    errorLog(t('cli.err.globalOnlyStats'))
     return 1
   }
 
@@ -882,7 +902,7 @@ async function runCli(userArgs: string[]): Promise<number> {
   if (deleted.given) {
     // `nmh --dir=… --delete=hard` with NO command is the one-liner (PRD §1) — targets default to cwd.
     if (trashMode !== undefined && deleted.mode === 'hard') {
-      errorLog("--trash applies to trash mode — hard delete is permanent by design, there is no trash to choose")
+      errorLog(t('cli.err.trashNotHard'))
       return 1
     }
     return runDelete({

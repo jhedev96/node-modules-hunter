@@ -9,6 +9,7 @@ import { renderSearchJson, renderSearchResults } from '../core/render.ts'
 import { writeReportSnapshot } from '../utils/report.ts'
 import { stripAnsi } from '../utils/format.ts'
 import type { SearchOutcome } from '../core/result.ts'
+import { t } from '../i18n/index.ts'
 
 export interface SearchRequest {
   /** User pattern: `/re/flags` → regex, glob chars → wildcard, else case-insensitive substring. */
@@ -73,7 +74,7 @@ export async function collectSearch(request: SearchRequest): Promise<SearchOutco
           ),
         )
         searched += 1
-        spinUpdate(`searching ${searched}/${entryCount} node_modules…`)
+        spinUpdate(t('search.spin.progress', { done: searched, total: entryCount }))
         return { entry, pathMatch, matches }
       }),
     ),
@@ -81,7 +82,7 @@ export async function collectSearch(request: SearchRequest): Promise<SearchOutco
   spinClear()
 
   const results = outcomes.filter((outcome) => outcome.pathMatch || outcome.matches.length > 0)
-  verboseLog(`search '${request.pattern}': ${results.length}/${entryCount} entries matched`)
+  verboseLog(t('verbose.searchMatched', { pattern: request.pattern, found: results.length, total: entryCount }))
 
   let code = 0
   if (results.length === 0) code = 2
@@ -101,7 +102,7 @@ export async function runSearch(request: SearchRequest): Promise<number> {
   }
 
   if (outcome.results.length === 0) {
-    warn(`no match for '${request.pattern}' in any scanned node_modules 🙃`)
+    warn(t('search.warn.noMatch', { pattern: request.pattern }))
     return outcome.code
   }
 

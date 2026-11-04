@@ -1,6 +1,7 @@
 import os from 'node:os'
 import { createRequire } from 'node:module'
 import { colors } from './logger.ts'
+import { t } from '../i18n/index.ts'
 
 let cached: string | null = null
 
@@ -64,9 +65,9 @@ export function renderVersionDetail(detail: VersionDetail): string {
   if (detail.distro !== null) systemParts.push(detail.distro)
   return [
     colors.bold(`node-modules-hunter v${detail.version}`),
-    colors.dim('hunt node_modules — scan · measure · clean safely'),
+    colors.dim(t('version.tagline')),
     row('runtime', `node ${detail.node}${detail.abi === null ? '' : ` (abi ${detail.abi})`}`),
     row('system', systemParts.join(' · ')),
-    row('io', `stdout tty: ${detail.stdoutTty ? 'yes' : 'no'}`),
+    row('io', `stdout tty: ${detail.stdoutTty ? t('version.yes') : t('version.no')}`),
   ].join('\n')
 }

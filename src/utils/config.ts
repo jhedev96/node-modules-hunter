@@ -3,6 +3,8 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { expandTilde } from './paths.ts'
 import { warn, verboseLog } from './logger.ts'
+import { t } from '../i18n/index.ts'
+import { isLocale } from '../i18n/index.ts'
 import type { DeleteMode } from '../core/result.ts'
 
 export class ConfigError extends Error {
@@ -26,6 +28,8 @@ export interface NmhConfig {
   animate: boolean
   /** --update-check opt-in from the config file (PRD §5.5); CLI flag wins the same way. */
   updateCheck?: boolean
+  /** UI locale (v1.3): 'en' | 'id' | 'zh' | 'ru' | 'es' — sits above the env in the chain. */
+  language?: string
   /** Tilde-expanded recovery-log directory. */
   logDir: string
 }
@@ -44,10 +48,10 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
   try {
     raw = JSON.parse(body)
   } catch (err) {
-    throw new ConfigError(`invalid config: ${file} is not valid JSON (${err instanceof Error ? err.message : String(err)})`)
+    throw new ConfigError(t('config.err.notJson', { file, detail: err instanceof Error ? err.message : String(err) }))
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new ConfigError(`invalid config: ${file} must contain a JSON object`)
+    throw new ConfigError(t('config.err.notObject', { file }))
   }
 
   const values: Partial<NmhConfig> = {}
@@ -55,14 +59,14 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
     switch (key) {
       case 'defaultMode':
         if (typeof value !== 'string' || !VALID_MODES.has(value)) {
-          throw new ConfigError(`invalid config: ${file}: defaultMode must be 'hard' | 'soft' | 'trash' (got ${JSON.stringify(value)})`)
+          throw new ConfigError(t('config.err.invalidMode', { file, value: JSON.stringify(value) }))
         }
         // 'soft' is a documented alias of 'trash' (same as --delete)
         values.defaultMode = (value === 'soft' ? 'trash' : value) as DeleteMode
         break
       case 'depth':
         if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-          throw new ConfigError(`invalid config: ${file}: depth must be a non-negative integer (got ${JSON.stringify(value)})`)
+          throw new ConfigError(t('config.err.invalidDepth', { file, value: JSON.stringify(value) }))
         }
         values.depth = value
         break
@@ -72,7 +76,7 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
           !Array.isArray(value) ||
           value.some((item) => typeof item !== 'string' || item.length === 0)
         ) {
-          throw new ConfigError(`invalid config: ${file}: ${key} must be an array of non-empty strings`)
+          throw new ConfigError(t('config.err.invalidList', { file, key }))
         }
         values[key] = value
         break
@@ -80,18 +84,24 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
       case 'animate':
       case 'updateCheck':
         if (typeof value !== 'boolean') {
-          throw new ConfigError(`invalid config: ${file}: ${key} must be true or false (got ${JSON.stringify(value)})`)
+          throw new ConfigError(t('config.err.notBoolean', { file, key, value: JSON.stringify(value) }))
         }
         values[key] = value
         break
+      case 'language':
+        if (typeof value !== 'string' || !isLocale(value.trim().toLowerCase())) {
+          throw new ConfigError(t('config.err.invalidLanguage', { file, value: JSON.stringify(value) }))
+        }
+        values.language = value.trim().toLowerCase()
+        break
       case 'logDir':
         if (typeof value !== 'string' || value.length === 0) {
-          throw new ConfigError(`invalid config: ${file}: logDir must be a non-empty string`)
+          throw new ConfigError(t('config.err.invalidLogDir', { file }))
         }
         values.logDir = expandTilde(value)
         break
       default:
-        warn(`${file}: unknown config key "${key}" — ignored`)
+        warn(t('config.warn.unknownKey', { file, key }))
     }
   }
   return values
@@ -104,7 +114,7 @@ async function readMaybe(file: string): Promise<string | null> {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT') return null
     if (code === 'EISDIR') return null
-    throw new ConfigError(`config unreadable: ${file} (${code ?? String(err)})`)
+    throw new ConfigError(t('config.err.unreadable', { file, code: code ?? String(err) }))
   }
 }
 
@@ -119,9 +129,9 @@ export async function loadConfig(explicitPath: string | null, cwd: string): Prom
     const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw)
     const body = await readMaybe(abs)
     if (body === null) {
-      throw new ConfigError(`config file not found: ${abs}`, 'file-not-found')
+      throw new ConfigError(t('config.err.notFound', { file: abs }), 'file-not-found')
     }
-    verboseLog(`config: using ${abs}`)
+    verboseLog(t('verbose.configUsing', { file: abs }))
     return { values: parseConfigBody(body, abs), source: abs }
   }
 
@@ -132,7 +142,7 @@ export async function loadConfig(explicitPath: string | null, cwd: string): Prom
       const candidate = path.join(current, name)
       const body = await readMaybe(candidate)
       if (body !== null) {
-        verboseLog(`config: found ${candidate}`)
+        verboseLog(t('verbose.configFound', { file: candidate }))
         return { values: parseConfigBody(body, candidate), source: candidate }
       }
     }
@@ -148,7 +158,7 @@ export async function loadConfig(explicitPath: string | null, cwd: string): Prom
       const candidate = path.join(home, name)
       const body = await readMaybe(candidate)
       if (body !== null) {
-        verboseLog(`config: found ${candidate}`)
+        verboseLog(t('verbose.configFound', { file: candidate }))
         return { values: parseConfigBody(body, candidate), source: candidate }
       }
     }

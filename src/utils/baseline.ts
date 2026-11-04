@@ -3,6 +3,7 @@ import path from 'node:path'
 import { homedir } from 'node:os'
 import { toolVersion } from './version.ts'
 import { warn, verboseLog } from './logger.ts'
+import { t } from '../i18n/index.ts'
 import type { StatsOutcome } from '../core/result.ts'
 
 /** Metadata snapshot for a project tree (PRD §8.3 baseline & compare). */
@@ -115,7 +116,7 @@ export async function loadBaseline(name: string): Promise<BaselineSnapshot | nul
     const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as BaselineSnapshot
     return parsed && parsed.schema === 1 && Array.isArray(parsed.entries) ? parsed : null
   } catch (err) {
-    verboseLog(`baseline read failed: ${err instanceof Error ? err.message : String(err)}`)
+    verboseLog(t('verbose.baselineReadFailed', { detail: err instanceof Error ? err.message : String(err) }))
     return null
   }
 }
@@ -141,7 +142,7 @@ export async function listBaselines(): Promise<BaselineListItem[]> {
         })
       }
     } catch {
-      warn(`skipping unreadable baseline: ${file}`)
+      warn(t('warn.baselineSkip', { file }))
     }
   }
   return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt))

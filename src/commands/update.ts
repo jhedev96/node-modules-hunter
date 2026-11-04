@@ -6,6 +6,7 @@ import { toolVersion } from '../utils/version.ts'
 import { isNewer } from '../utils/update-check.ts'
 import { errorLog, log, note, payload, spinUpdate, spinClear, verboseLog, isTTYOut } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
+import { t } from '../i18n/index.ts'
 
 const execFileP = promisify(execFile)
 
@@ -116,7 +117,7 @@ async function latestManifest(): Promise<LatestManifest | null> {
       const detail = Object.keys(base).length > 0 ? base : await fetchDetail(version, false)
       return { version, detail }
     } catch (err) {
-      verboseLog(`update: override file unreadable (${err instanceof Error ? err.message : String(err)})`)
+      verboseLog(t('verbose.updateOverrideUnreadable', { detail: err instanceof Error ? err.message : String(err) }))
       return null
     }
   }
@@ -128,7 +129,7 @@ async function latestManifest(): Promise<LatestManifest | null> {
 async function latestVersionText(): Promise<string | null> {
   const view = await runNpm(['view', 'node-modules-hunter', 'version'], 60_000)
   if (view.code !== 0) {
-    verboseLog(`npm view failed (rc ${view.code}): ${view.stderr.trim().slice(0, 200)}`)
+    verboseLog(t('verbose.npmViewFailed', { code: view.code, stderr: view.stderr.trim().slice(0, 200) }))
     return null
   }
   const version = view.stdout.trim()
@@ -211,11 +212,11 @@ async function installLatest(version: string): Promise<{ ok: boolean; detail: st
       return { ok: false, detail: err instanceof Error ? err.message : String(err) }
     }
   }
-  spinUpdate('updating via npm…')
+  spinUpdate(t('update.spin'))
   const install = await runNpm(['install', '-g', 'node-modules-hunter@' + version], 300_000)
   spinClear()
   if (install.code !== 0) {
-    return { ok: false, detail: install.stderr.trim().slice(0, 300) || `npm exited ${install.code}` }
+    return { ok: false, detail: install.stderr.trim().slice(0, 300) || t('update.err.npmExit', { code: install.code }) }
   }
   return { ok: true, detail: installCommand }
 }
@@ -223,18 +224,22 @@ async function installLatest(version: string): Promise<{ ok: boolean; detail: st
 function renderInfo(current: string, manifest: LatestManifest, updateAvailable: boolean, global: boolean): string[] {
   const d = manifest.detail
   const rows = [
-    `installed   ${current}`,
-    `latest      ${manifest.version}`,
-    `update      ${updateAvailable ? `tersedia — jalankan \`nmh update\`${global ? '' : ' (atau: npm i -g node-modules-hunter)'}` : 'tidak ada — ini versi terbaru'}`,
+    t('update.info.installed', { value: current }),
+    t('update.info.latest', { value: manifest.version }),
+    t('update.info.update', {
+      value: updateAvailable
+        ? t('update.info.available') + (global ? '' : t('update.info.availableNonGlobal'))
+        : t('update.info.none'),
+    }),
   ]
-  if (d.description !== undefined) rows.push(`summary     ${d.description}`)
+  if (d.description !== undefined) rows.push(t('update.info.summary', { value: d.description }))
   if (d.tarball !== undefined) {
-    const size = d.unpackedSize === undefined ? '' : ` (${d.unpackedSize}${d.fileCount === undefined ? '' : `, ${d.fileCount} files`})`
-    rows.push(`tarball     ${d.tarball}${size}`)
+    const size = d.unpackedSize === undefined ? '' : t('update.info.sizeSuffix', { size: d.unpackedSize, files: d.fileCount === undefined ? '' : `, ${d.fileCount}` })
+    rows.push(t('update.info.tarball', { value: d.tarball }) + size)
   }
-  if (d.engines !== undefined) rows.push(`engines     node ${d.engines}`)
-  if (d.license !== undefined) rows.push(`license     ${d.license}`)
-  if (d.publishedAt !== undefined) rows.push(`published   ${d.publishedAt}`)
+  if (d.engines !== undefined) rows.push(t('update.info.engines', { value: d.engines }))
+  if (d.license !== undefined) rows.push(t('update.info.license', { value: d.license }))
+  if (d.publishedAt !== undefined) rows.push(t('update.info.published', { value: d.publishedAt }))
   return rows
 }
 
@@ -250,7 +255,7 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
   const current = toolVersion()
   const manifest = await latestManifest()
   if (manifest === null) {
-    const message = 'cannot read the latest version — is the registry reachable? (npm view node-modules-hunter version)'
+    const message = t('update.err.noRegistry')
     if (request.json) errorLog(message)
     else errorLog(`⚠ ${message}`)
     return 1
@@ -265,29 +270,29 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
   // --info: the npm-view-style read-out — facts only, never an install (stdout: pipeable)
   if (request.mode === 'info') {
     if (request.json) payload(JSON.stringify({ ...result(false), detail: manifest.detail }, null, 2))
-    else log(['nmh update — info registry (npm view node-modules-hunter)', ...renderInfo(current, manifest, updateAvailable, global)].join('\n'))
+    else log([t('update.info.title'), ...renderInfo(current, manifest, updateAvailable, global)].join('\n'))
     return 0
   }
 
   // --check: the compact compare for scripts/CI — newest or not, exit 0 either way
   if (request.mode === 'check') {
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else if (updateAvailable) log(`↑ update tersedia: ${current} → ${latest} — jalankan \`nmh update\` untuk menginstall`)
-    else log(`✓ nmh ${current} sudah versi terbaru (registry: ${latest})`)
+    else if (updateAvailable) log(t('update.check.available', { current, latest }))
+    else log(t('update.check.latest', { current, latest }))
     return 0
   }
 
   if (!updateAvailable) {
     // --force on an already-latest install: checked, reported, NOT reinstalled (v1.2 decision)
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else log(`✓ nmh ${current} sudah versi terbaru (registry: ${latest}) — tak ada yang diinstall`)
+    else log(t('update.latestNoInstall', { current, latest }))
     return 0
   }
 
   if (!global) {
     const advice = [
-      `nmh ${current} terpasang di luar npm global — update manual:`,
-      '  npm i -g node-modules-hunter        (atau: pnpm add -g / bunx / brew upgrade node-modules-hunter)',
+      t('update.manual.title', { current }),
+      t('update.manual.command'),
     ]
     if (request.json) payload(JSON.stringify(result(false), null, 2))
     else for (const line of advice) note(line)
@@ -299,11 +304,11 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
   let install = request.force || request.answer === 'yes'
   if (!install && request.answer === 'none') {
     if (request.json || !isTTYOut()) {
-      errorLog('update butuh jawaban eksplisit — -y untuk menginstall, -n untuk menolak (--check/--info untuk lihat saja)')
+      errorLog(t('update.err.needsAnswer'))
       return 1
     }
     const admitted = await confirm({
-      message: `Update nmh ${current} → ${latest} via npm install -g?`,
+      message: t('update.confirm', { current, latest }),
       initialValue: true,
     })
     install = admitted === true
@@ -311,18 +316,18 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
 
   if (!install) {
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else log(`✕ tetap nmh ${current} — update ke ${latest} tidak diinstall`)
+    else log(t('update.declined', { current, latest }))
     return 0
   }
 
   const installation = await installLatest(latest)
   if (!installation.ok) {
-    errorLog(`⚠ update gagal: ${installation.detail}`)
-    errorLog(`  coba manual: npm install -g node-modules-hunter@${latest}`)
+    errorLog(t('update.err.failed', { detail: installation.detail }))
+    errorLog(t('update.err.manualHint', { latest }))
     return 1
   }
 
   if (request.json) payload(JSON.stringify(result(true), null, 2))
-  else log(`✓ terupdate ${current} → ${latest} (npm install -g node-modules-hunter)`)
+  else log(t('update.done', { current, latest }))
   return 0
 }

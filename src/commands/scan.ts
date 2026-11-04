@@ -13,6 +13,7 @@ import { createPmDetector } from '../core/pm-detect.ts'
 import { projectNameFor } from '../core/packages.ts'
 import { insideRoot, SELF_TOKEN } from '../core/guards.ts'
 import { renderScanResult, shortenPath } from '../core/render.ts'
+import { t } from '../i18n/index.ts'
 import type { ScanCommandResult, ScanEntry, ScanTotals } from '../core/result.ts'
 
 export interface ScanRequest {
@@ -63,11 +64,11 @@ export type SortKey = 'size' | 'path' | 'idle' | 'mtime'
 export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   const started = Date.now()
   const targets = request.targets.length > 0 ? request.targets : ['.']
-  verboseLog(`targets: ${targets.join(', ')}`)
+  verboseLog(t('verbose.scanTargets', { targets: targets.join(', ') }))
 
   const { roots, unmatched, unresolvable } = await resolveRoots(targets, request.cwd)
-  for (const pattern of unmatched) warn(`no match for pattern: ${pattern}`)
-  for (const suspect of unresolvable) warn(`cannot resolve real path (symlink loop?): ${suspect}`)
+  for (const pattern of unmatched) warn(t('scan.warn.noMatch', { pattern }))
+  for (const suspect of unresolvable) warn(t('scan.warn.unresolvable', { path: suspect }))
 
   if (roots.length === 0 && unmatched.length + unresolvable.length > 0) {
     return { code: 2, result: emptyResult(targets, unresolvable) }
@@ -76,7 +77,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   // Targets that already ARE a node_modules folder are measured directly, not searched.
   const directTargets = roots.filter((root) => basename(root) === 'node_modules')
   const walkRoots = roots.filter((root) => basename(root) !== 'node_modules')
-  verboseLog(`walk roots: ${walkRoots.length}, direct node_modules: ${directTargets.length}`)
+  verboseLog(t('verbose.walkRoots', { walk: walkRoots.length, direct: directTargets.length }))
 
   const collected: WalkEntry[] = directTargets.map((target) => ({
     path: target,
@@ -113,7 +114,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
 
   const metaByPath = new Map(collected.map((entry) => [entry.path, entry]))
   const entryPaths = [...metaByPath.keys()]
-  verboseLog(`found ${entryPaths.length} node_modules — measuring`)
+  verboseLog(t('verbose.scanFound', { n: entryPaths.length }))
 
   const measures = await collectMeasures(entryPaths, request.fastSize === true, permIssues)
   spinClear()
@@ -121,7 +122,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   const detect = createPmDetector()
   const pmLimiter = createLimiter(8)
   const pmResults = await Promise.all(entryPaths.map((entryPath) => pmLimiter(() => detect(entryPath))))
-  verboseLog(`scan finished in ${Date.now() - started} ms`)
+  verboseLog(t('verbose.scanDone', { ms: Date.now() - started }))
 
   // --stale / --sort idle (v1.1): the git-activity signal costs one bounded git spawn per
   // project — only computed when asked, keyed by the entry's own dir (nested entries climb
@@ -196,7 +197,7 @@ export async function collectScan(request: ScanRequest): Promise<ScanOutcome> {
   }
 
   if (request.listPm && !request.json && topEntries.length > 0) {
-    log(`detected PMs: ${describeDetectedPms(topEntries)}`)
+    log(t('scan.detectedPms', { pms: describeDetectedPms(topEntries) }))
   }
 
   let code = 0
@@ -220,7 +221,7 @@ async function collectMeasures(
   let measuredCount = 0
   let bytesSoFar = 0
   const bump = (): void => {
-    spinUpdate(`measuring ${measuredCount}/${entryCount} folders · ${formatBytes(bytesSoFar)}`)
+    spinUpdate(t('scan.spin.measuring', { done: measuredCount, total: entryCount, size: formatBytes(bytesSoFar) }))
   }
   if (!fastSize) {
     return measureEntries(entryPaths, permIssues, {
@@ -261,7 +262,7 @@ async function collectMeasures(
       concurrency: 4,
       onProgress: (progress) => {
         spinUpdate(
-          `measuring ${duCount + progress.measuredEntries}/${entryCount} folders · ${formatBytes(duBytes + progress.bytesSoFar)}`,
+          t('scan.spin.measuring', { done: duCount + progress.measuredEntries, total: entryCount, size: formatBytes(duBytes + progress.bytesSoFar) }),
         )
       },
     })
@@ -340,7 +341,7 @@ export async function runScan(request: ScanRequest): Promise<ScanOutcome> {
   const { result } = outcome
 
   if (result.entries.length === 0) {
-    if (!request.json) warn('no node_modules found — nothing to hunt here 🙃')
+    if (!request.json) warn(t('scan.warn.none'))
     else payload(renderedScan(result, request, true))
     await writeReport(request, result)
     return outcome
