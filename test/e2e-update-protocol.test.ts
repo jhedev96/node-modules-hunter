@@ -197,4 +197,55 @@ describe('nmh update protocol (v1.2) — read-only views, consented install', ()
       await rmTree(root)
     }
   })
+
+  it('regression (v1.2.0 hotfix): modern npm view --json is an abbreviated PACKUMENT ARRAY — --info must normalize it', async () => {
+    const root = await tmpRoot('update-packument')
+    try {
+      await fs.writeFile(path.join(root, 'latest.json'), JSON.stringify({ version: '9.9.9' }))
+      // the exact shape npm ≥10 prints for `npm view <pkg> --json` — no top-level `version`,
+      // versions as a string list; v1.2.0 parsed this and exited "cannot read" everywhere
+      await fs.writeFile(
+        path.join(root, 'packument.json'),
+        JSON.stringify([
+          {
+            _id: 'node-modules-hunter@9.9.9',
+            name: 'node-modules-hunter',
+            'dist-tags': { latest: '9.9.9' },
+            versions: ['1.0.0', '1.1.0', '9.9.9'],
+            description: 'hunt bloated node_modules folders',
+            license: 'MIT',
+            dist: { tarball: 'https://registry.npmjs.org/x.tgz', unpackedSize: 236_000, fileCount: 4 },
+            engines: { node: '>=18' },
+          },
+        ]),
+      )
+      const run = await runCli(['update', '--info'], {
+        home: root,
+        envExtra: { ...seams(root, '9.9.9', '0'), NMH_UPDATE_VIEW_JSON: path.join(root, 'packument.json') },
+      })
+      expect(run.code).toBe(0)
+      expect(run.stdout).toContain('latest      9.9.9')
+      expect(run.stdout).toContain('summary     hunt bloated node_modules folders')
+      expect(run.stdout).toContain('tarball     https://registry.npmjs.org/x.tgz')
+      // a single-object view payload works the same way
+      await fs.writeFile(path.join(root, 'single.json'), JSON.stringify(infoManifest))
+      const single = await runCli(['update', '--info', '--json'], {
+        home: root,
+        envExtra: { ...seams(root, '9.9.9', '0'), NMH_UPDATE_VIEW_JSON: path.join(root, 'single.json') },
+      })
+      const payload = JSON.parse(single.stdout) as UpdatePayload
+      expect(payload.detail?.fileCount).toBe(4)
+      // an unreadable detail fetch must not sink the run — facts minus detail, rc 0
+      await fs.writeFile(path.join(root, 'broken.json'), 'not json{')
+      const broken = await runCli(['update', '--info'], {
+        home: root,
+        envExtra: { ...seams(root, '9.9.9', '0'), NMH_UPDATE_VIEW_JSON: path.join(root, 'broken.json') },
+      })
+      expect(broken.code).toBe(0)
+      expect(broken.stdout).toContain('latest      9.9.9')
+      expect(broken.stdout).not.toContain('summary')
+    } finally {
+      await rmTree(root)
+    }
+  })
 })

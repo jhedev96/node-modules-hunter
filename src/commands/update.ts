@@ -93,11 +93,15 @@ function manifestDetailFrom(parsed: Record<string, unknown>): UpdateDetail {
 }
 
 /**
- * Latest published version + registry facts. Reads the user's own npm config (registry
- * mirrors included) via `npm view --json`. Test/MCI escape hatch, mirroring the NMH-*
- * family: when NMH_UPDATE_LATEST_JSON points to a JSON file it wins entirely (no spawn,
- * no network) — extra npm-view fields in it feed `--info`; a bare {"version":"x.y.z"}
- * keeps the v1.1 shape working.
+ * Latest published version + registry facts. Version detection goes through
+ * `npm view <pkg> version` (plain text — the one npm-output shape that is stable
+ * across npm versions; v1.2.0 briefly parsed `npm view --json` instead and died:
+ * modern npm returns the ABBREVIATED PACKUMENT there — an array of version
+ * strings — with no top-level `version` key). The `--info` detail is a separate
+ * best-effort `npm view <pkg>@latest --json` whose many shapes get normalized.
+ * Test/MCI escape hatch, mirroring the NMH-* family: NMH_UPDATE_LATEST_JSON wins
+ * for the version (and may carry detail fields), NMH_UPDATE_VIEW_JSON feeds the
+ * detail fetch with a recorded npm-view payload — zero spawns, fully hermetic.
  */
 async function latestManifest(): Promise<LatestManifest | null> {
   const override = process.env.NMH_UPDATE_LATEST_JSON
@@ -106,27 +110,66 @@ async function latestManifest(): Promise<LatestManifest | null> {
       const parsed = JSON.parse(await fs.readFile(override, 'utf8')) as Record<string, unknown>
       const version = parsed.version
       if (typeof version !== 'string' || !VERSION_SHAPE.test(version)) return null
-      return { version, detail: manifestDetailFrom(parsed) }
+      const base = manifestDetailFrom(parsed)
+      // a bare {"version"} override has no facts to show — the VIEW SEAM can still fill in,
+      // but never a spawn: an override run must stay hermetic (slow-runner hardened)
+      const detail = Object.keys(base).length > 0 ? base : await fetchDetail(version, false)
+      return { version, detail }
     } catch (err) {
       verboseLog(`update: override file unreadable (${err instanceof Error ? err.message : String(err)})`)
       return null
     }
   }
-  const view = await runNpm(['view', 'node-modules-hunter', '--json'], 60_000)
+  const version = await latestVersionText()
+  if (version === null) return null
+  return { version, detail: await fetchDetail(version, true) }
+}
+
+async function latestVersionText(): Promise<string | null> {
+  const view = await runNpm(['view', 'node-modules-hunter', 'version'], 60_000)
   if (view.code !== 0) {
     verboseLog(`npm view failed (rc ${view.code}): ${view.stderr.trim().slice(0, 200)}`)
     return null
   }
-  try {
-    const parsed = JSON.parse(view.stdout) as Record<string, unknown>
-    const version = parsed.version
-    if (typeof version !== 'string' || !VERSION_SHAPE.test(version)) return null
-    const detail = manifestDetailFrom(parsed)
-    detail.publishedAt = await publishedTime(version)
-    return { version, detail }
-  } catch {
-    return null
+  const version = view.stdout.trim()
+  return VERSION_SHAPE.test(version) ? version : null
+}
+
+/** npm view has shipped both single objects and arrays for the same query — accept every shape. */
+function manifestFromView(raw: unknown): Record<string, unknown> | null {
+  if (Array.isArray(raw)) {
+    const objects = raw.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object')
+    return objects.length > 0 ? objects[objects.length - 1] : null
   }
+  return raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+}
+
+/** Best-effort: --info keeps working (facts minus detail) when this fetch or its shape falters.
+ * `allowSpawn=false` (override runs) reads ONLY the seam file — the run stays hermetic. */
+async function fetchDetail(version: string, allowSpawn: boolean): Promise<UpdateDetail> {
+  const seam = process.env.NMH_UPDATE_VIEW_JSON
+  let raw: unknown = null
+  if (typeof seam === 'string' && seam.length > 0) {
+    try {
+      raw = JSON.parse(await fs.readFile(seam, 'utf8'))
+    } catch {
+      return {}
+    }
+  } else {
+    if (!allowSpawn) return {}
+    const view = await runNpm(['view', `node-modules-hunter@${version}`, '--json'], 60_000)
+    if (view.code !== 0) return {}
+    try {
+      raw = JSON.parse(view.stdout)
+    } catch {
+      return {}
+    }
+  }
+  const manifest = manifestFromView(raw)
+  if (manifest === null) return {}
+  const detail = manifestDetailFrom(manifest)
+  if (typeof seam !== 'string' || seam.length === 0) detail.publishedAt = await publishedTime(version)
+  return detail
 }
 
 /** Publish time of the latest release — best-effort (`npm view <pkg> time`), failure is silent. */
