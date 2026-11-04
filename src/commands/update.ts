@@ -5,6 +5,7 @@ import { confirm, isCancel } from '@clack/prompts'
 import { toolVersion } from '../utils/version.ts'
 import { isNewer } from '../utils/update-check.ts'
 import { errorLog, log, note, payload, spinUpdate, spinClear, verboseLog, isTTYOut } from '../utils/logger.ts'
+import { isValidDistTag } from '../utils/config.ts'
 import { formatBytes } from '../utils/format.ts'
 import { t } from '../i18n/index.ts'
 
@@ -14,6 +15,8 @@ const execFileP = promisify(execFile)
 export type UpdateMode = 'check' | 'info' | 'default'
 /** v1.2: -y / -n on the CLI; 'none' = ask interactively (TTY) or refuse (non-TTY/--json). */
 export type UpdateAnswer = 'yes' | 'no' | 'none'
+/** v1.4: how the selected dist-tag's version relates to the installed one. */
+export type UpdateDirection = 'upgrade' | 'downgrade' | 'current'
 
 export interface UpdateRequest {
   json: boolean
@@ -21,6 +24,8 @@ export interface UpdateRequest {
   answer: UpdateAnswer
   /** -f/--force: install without asking when an update exists — never reinstalls a latest version. */
   force: boolean
+  /** v1.4: which npm dist-tag to read (default 'latest'); cli merges --tag/--check <tag>/rc updateTag. */
+  tag?: string
 }
 
 export interface UpdateDetail {
@@ -40,6 +45,13 @@ export interface UpdateResult {
   method: 'npm-global' | 'manual'
   /** v1.2 (additive key): true when the registry offers something newer than the installed version. */
   updateAvailable: boolean
+  /** v1.4 (additive keys): the dist-tag this run read from, the version it points at, and how
+   * that compares to the installed one — `latest` stays the version of the `latest` dist-tag. */
+  tag: string
+  target: string
+  direction: UpdateDirection
+  /** v1.4 (additive key): every published dist-tag — --info only, when the registry answers. */
+  distTags?: Record<string, string>
   /** v1.2 (additive key): npm-view style registry facts — --info only. */
   detail?: UpdateDetail
 }
@@ -197,6 +209,40 @@ async function isNpmGlobal(): Promise<boolean> {
 }
 
 /**
+ * Every published dist-tag as `name → version` (v1.4). The test seam
+ * NMH_UPDATE_DIST_TAGS_JSON points at a recorded `npm view … dist-tags --json`
+ * payload — zero spawns, fully hermetic, mirroring the NMH_UPDATE_LATEST_JSON pattern.
+ * `allowSpawn=false` (override runs) reads ONLY the seam. Returns null when nothing
+ * readable came back — callers fall back to the latest-manifest version for `latest`.
+ */
+async function distTagsMap(allowSpawn: boolean): Promise<Record<string, string> | null> {
+  const collect = (raw: unknown): Record<string, string> | null => {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const out: Record<string, string> = {}
+    for (const [name, version] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof version === 'string' && VERSION_SHAPE.test(version)) out[name] = version
+    }
+    return Object.keys(out).length > 0 ? out : null
+  }
+  const seam = process.env.NMH_UPDATE_DIST_TAGS_JSON
+  if (typeof seam === 'string' && seam.length > 0) {
+    try {
+      return collect(JSON.parse(await fs.readFile(seam, 'utf8')))
+    } catch {
+      return null
+    }
+  }
+  if (!allowSpawn) return null
+  const view = await runNpm(['view', 'node-modules-hunter', 'dist-tags', '--json'], 60_000)
+  if (view.code !== 0) return null
+  try {
+    return collect(JSON.parse(view.stdout))
+  } catch {
+    return null
+  }
+}
+
+/**
  * The self-update step. Real installs go through `npm install -g`; tests can point
  * NMH_UPDATE_FAKE_INSTALL at a writable file — the exact command is recorded there
  * and the install "succeeds" without touching the network or the machine.
@@ -221,7 +267,7 @@ async function installLatest(version: string): Promise<{ ok: boolean; detail: st
   return { ok: true, detail: installCommand }
 }
 
-function renderInfo(current: string, manifest: LatestManifest, updateAvailable: boolean, global: boolean): string[] {
+function renderInfo(current: string, manifest: LatestManifest, updateAvailable: boolean, global: boolean, distTags: Record<string, string> | null): string[] {
   const d = manifest.detail
   const rows = [
     t('update.info.installed', { value: current }),
@@ -232,6 +278,10 @@ function renderInfo(current: string, manifest: LatestManifest, updateAvailable: 
         : t('update.info.none'),
     }),
   ]
+  if (distTags !== null) {
+    const tags = Object.entries(distTags).map(([name, version]) => `${name}=${version}`).join(', ')
+    rows.push(t('update.info.tags', { tags }))
+  }
   if (d.description !== undefined) rows.push(t('update.info.summary', { value: d.description }))
   if (d.tarball !== undefined) {
     const size = d.unpackedSize === undefined ? '' : t('update.info.sizeSuffix', { size: d.unpackedSize, files: d.fileCount === undefined ? '' : `, ${d.fileCount}` })
@@ -249,10 +299,21 @@ function renderInfo(current: string, manifest: LatestManifest, updateAvailable: 
  * --json need -y or -n on the command line, mirroring the delete protocol). --check and
  * --info are read-only views that never install. --force skips the ask — but an
  * already-latest install is checked and left alone, never blindly reinstalled.
+ * v1.4 adds dist-tags: --tag <name> (and `--check [tag]`, rc updateTag) reads any tag —
+ * a tag pointing below the installed version becomes a *downgrade*, which gets the same
+ * consent gate as an upgrade but defaults to NO on the TTY confirm. A tag pointing at
+ * the installed version is `current`: facts, no install.
  * Exit 0 when up-to-date, declined, or updated; 1 when the registry or install fails.
  */
 export async function runUpdate(request: UpdateRequest): Promise<number> {
   const current = toolVersion()
+  const tag = request.tag ?? 'latest'
+  if (!isValidDistTag(tag)) {
+    const message = t('update.err.invalidTag', { value: tag })
+    errorLog(request.json ? message : `⚠ ${message}`)
+    return 1
+  }
+
   const manifest = await latestManifest()
   if (manifest === null) {
     const message = t('update.err.noRegistry')
@@ -261,31 +322,56 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
     return 1
   }
 
+  // dist-tags decide which version the run reads (v1.4). An override run (LATEST_JSON
+  // set) must stay hermetic — no spawns, so a non-latest tag without a DIST_TAGS_JSON
+  // seam is a registry failure, not a silent fallback to latest.
+  const hermetic = typeof process.env.NMH_UPDATE_LATEST_JSON === 'string' && process.env.NMH_UPDATE_LATEST_JSON.length > 0
+  const distTags = await distTagsMap(!hermetic)
+  let target: string
+  if (tag === 'latest') {
+    target = distTags?.latest ?? manifest.version
+  } else if (distTags !== null && typeof distTags[tag] === 'string') {
+    target = distTags[tag]
+  } else if (distTags === null) {
+    const message = t('update.err.noRegistry')
+    if (request.json) errorLog(message)
+    else errorLog(`⚠ ${message}`)
+    return 1
+  } else {
+    const tags = Object.keys(distTags).join(', ')
+    const message = t('update.err.tagUnknown', { tag, tags })
+    if (request.json) errorLog(message)
+    else errorLog(`⚠ ${message}`)
+    return 1
+  }
+
   const latest = manifest.version
   const global = await isNpmGlobal()
   const method: UpdateResult['method'] = global ? 'npm-global' : 'manual'
-  const updateAvailable = isNewer(current, latest)
-  const result = (updated: boolean): UpdateResult => ({ current, latest, updated, method, updateAvailable })
+  const direction: UpdateDirection = isNewer(current, target) ? 'upgrade' : isNewer(target, current) ? 'downgrade' : 'current'
+  const updateAvailable = direction === 'upgrade'
+  const result = (updated: boolean): UpdateResult => ({ current, latest, updated, method, updateAvailable, tag, target, direction })
 
   // --info: the npm-view-style read-out — facts only, never an install (stdout: pipeable)
   if (request.mode === 'info') {
-    if (request.json) payload(JSON.stringify({ ...result(false), detail: manifest.detail }, null, 2))
-    else log([t('update.info.title'), ...renderInfo(current, manifest, updateAvailable, global)].join('\n'))
+    if (request.json) payload(JSON.stringify({ ...result(false), distTags: distTags ?? undefined, detail: manifest.detail }, null, 2))
+    else log([t('update.info.title'), ...renderInfo(current, manifest, updateAvailable, global, distTags)].join('\n'))
     return 0
   }
 
   // --check: the compact compare for scripts/CI — newest or not, exit 0 either way
   if (request.mode === 'check') {
+    const onTag = tag === 'latest' ? '' : ` ${t('update.check.onTag', { tag })}`
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else if (updateAvailable) log(t('update.check.available', { current, latest }))
-    else log(t('update.check.latest', { current, latest }))
+    else if (updateAvailable) log(t('update.check.available', { current, latest: target }) + onTag)
+    else log(t('update.check.latest', { current, latest: target }) + onTag)
     return 0
   }
 
-  if (!updateAvailable) {
-    // --force on an already-latest install: checked, reported, NOT reinstalled (v1.2 decision)
+  if (direction === 'current') {
+    // --force on an already-current install: checked, reported, NOT reinstalled (v1.2 decision)
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else log(t('update.latestNoInstall', { current, latest }))
+    else log(t('update.latestNoInstall', { current, latest: target }))
     return 0
   }
 
@@ -299,8 +385,10 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
     return 0
   }
 
-  // consent gate (v1.2): -y installs, -n declines, otherwise ask on a TTY —
-  // non-TTY/--json without an answer refuse loud, exactly like a delete without -y
+  // consent gate (v1.2, v1.4): -y installs, -n declines, otherwise ask on a TTY —
+  // non-TTY/--json without an answer refuse loud, exactly like a delete without -y.
+  // A downgrade defaults to NO on the ask (overwriting a newer install is never the
+  // obvious move); --force still skips the ask in both directions.
   let install = request.force || request.answer === 'yes'
   if (!install && request.answer === 'none') {
     if (request.json || !isTTYOut()) {
@@ -308,26 +396,28 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
       return 1
     }
     const admitted = await confirm({
-      message: t('update.confirm', { current, latest }),
-      initialValue: true,
+      message: direction === 'downgrade'
+        ? t('update.confirm.downgrade', { current, target, tag })
+        : t('update.confirm', { current, latest: target }),
+      initialValue: direction !== 'downgrade',
     })
     install = admitted === true
   }
 
   if (!install) {
     if (request.json) payload(JSON.stringify(result(false), null, 2))
-    else log(t('update.declined', { current, latest }))
+    else log(t('update.declined', { current, latest: target }))
     return 0
   }
 
-  const installation = await installLatest(latest)
+  const installation = await installLatest(target)
   if (!installation.ok) {
     errorLog(t('update.err.failed', { detail: installation.detail }))
-    errorLog(t('update.err.manualHint', { latest }))
+    errorLog(t('update.err.manualHint', { latest: target }))
     return 1
   }
 
   if (request.json) payload(JSON.stringify(result(true), null, 2))
-  else log(t('update.done', { current, latest }))
+  else log(t('update.done', { current, latest: target }))
   return 0
 }

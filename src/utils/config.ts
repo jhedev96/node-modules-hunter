@@ -30,6 +30,8 @@ export interface NmhConfig {
   updateCheck?: boolean
   /** UI locale (v1.3): 'en' | 'id' | 'zh' | 'ru' | 'es' — sits above the env in the chain. */
   language?: string
+  /** Update dist-tag (v1.4): which npm dist-tag `nmh update`/`--check` read from (default 'latest'). */
+  updateTag?: string
   /** Tilde-expanded recovery-log directory. */
   logDir: string
 }
@@ -42,6 +44,11 @@ export interface LoadedConfig {
 
 const FILE_NAMES = ['.nmhrc', '.nmhrc.json']
 const VALID_MODES = new Set(['hard', 'soft', 'trash'])
+
+/** npm dist-tag name shape: alphanumeric, dot, underscore, hyphen; must start/end alphanumeric (max 64). */
+export function isValidDistTag(tag: string): boolean {
+  return tag.length > 0 && tag.length <= 64 && /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(tag)
+}
 
 function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
   let raw: unknown
@@ -99,6 +106,12 @@ function parseConfigBody(body: string, file: string): Partial<NmhConfig> {
           throw new ConfigError(t('config.err.invalidLogDir', { file }))
         }
         values.logDir = expandTilde(value)
+        break
+      case 'updateTag':
+        if (typeof value !== 'string' || !isValidDistTag(value)) {
+          throw new ConfigError(t('config.err.invalidUpdateTag', { file, value: JSON.stringify(value) }))
+        }
+        values.updateTag = value
         break
       default:
         warn(t('config.warn.unknownKey', { file, key }))

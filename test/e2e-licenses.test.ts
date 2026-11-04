@@ -59,7 +59,7 @@ describe('license scan e2e (--licenses / --by licenses)', () => {
       expect(run.stdout).toContain('LICENSES')
       expect(run.stdout).toContain('MIT')
       expect(run.stdout).toContain('GPL-3.0-or-later')
-      expect(run.stdout).toContain('copyleft di production dependencies')
+      expect(run.stdout).toContain('copyleft in production dependencies')
       expect(run.stdout).toContain('unknown')
       // unfocused sections (TOP packages) stay hidden on a focused run
       expect(run.stdout).not.toContain('TOP PACKAGES')

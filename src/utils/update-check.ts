@@ -26,10 +26,16 @@ function registryUrl(): string {
   return process.env.NMH_REGISTRY_JSON ?? 'https://registry.npmjs.org/node-modules-hunter/latest'
 }
 
-/** Plain triple-version compare (`0.4.10` > `0.4.9`); prerelease suffix on latest ignored except ordering ties. */
+/**
+ * Semver-aware compare. Triples decide first; on a triple tie the prerelease
+ * breaks it — no prerelease beats any prerelease, otherwise identifiers compare
+ * left-to-right (numeric identifiers numerically, everything else lexically,
+ * shorter set loses). So `1.4.0` > `1.4.0-beta.1` and `1.4.0-beta.2` > `1.4.0-beta.1`
+ * — a tag can now offer an honest downgrade/upgrade inside the same triple.
+ */
 export function isNewer(current: string, latest: string): boolean {
   const triple = (v: string): [number, number, number, string] | null => {
-    const match = /^(\d+)\.(\d+)\.(\d+)(.*)$/.exec(v.trim())
+    const match = /^(\d+)\.(\d+)\.(\d+)(?:-?([^+]*))?(?:\+.*)?$/.exec(v.trim())
     return match === null
       ? null
       : [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ?? '']
@@ -41,7 +47,27 @@ export function isNewer(current: string, latest: string): boolean {
     if (next[i]! > now[i]!) return true
     if (next[i]! < now[i]!) return false
   }
-  return false
+  // triple tie — prerelease decides (v1.4): none > some, then identifier-wise
+  const curPre = now[3] === '' ? [] : now[3].split('.')
+  const nextPre = next[3] === '' ? [] : next[3].split('.')
+  if (curPre.length === 0 && nextPre.length === 0) return false
+  if (curPre.length === 0) return false // a release beats its own prereleases
+  if (nextPre.length === 0) return true // current is a prerelease of the release
+  for (let i = 0; i < Math.min(curPre.length, nextPre.length); i += 1) {
+    const a = curPre[i]
+    const b = nextPre[i]
+    const numA = /^\d+$/.test(a)
+    const numB = /^\d+$/.test(b)
+    if (numA && numB) {
+      const diff = Number(b) - Number(a)
+      if (diff !== 0) return diff > 0
+    } else if (numA !== numB) {
+      return !numB // numeric identifiers sort below alphanumeric ones
+    } else if (a !== b) {
+      return b > a
+    }
+  }
+  return nextPre.length > curPre.length
 }
 
 export function updateNote(latest: string, current: string): string {

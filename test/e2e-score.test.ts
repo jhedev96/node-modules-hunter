@@ -107,7 +107,7 @@ describe('score & co2 e2e (--score / --co2)', () => {
       expect(run.stdout).toContain('81 / 100')
       expect(run.stdout).toContain('grade F')
       // the audit runs implicitly for --score, even without --dead
-      expect(run.stdout).not.toContain('tidak diaudit')
+      expect(run.stdout).not.toContain('not audited')
       // focused: TOP PACKAGES stays hidden
       expect(run.stdout).not.toContain('TOP PACKAGES')
 
@@ -135,8 +135,8 @@ describe('score & co2 e2e (--score / --co2)', () => {
       const run = await runCli(['stats', '.', '--co2'], { cwd: root, home: root })
       expect(run.code).toBe(0)
       expect(run.stdout).toContain('CO2 ESTIMATE')
-      expect(run.stdout).toContain('simpan setahun')
-      expect(run.stdout).toContain('men-download ulang')
+      expect(run.stdout).toContain('one year of storage')
+      expect(run.stdout).toContain('re-downloading')
       const grams = [...run.stdout.matchAll(/([\d.]+) (g|kg) CO2e/g)].map((match) => Number(match[1]) * (match[2] === 'kg' ? 1000 : 1))
       expect(grams.length).toBe(2)
       const [storage, transfer] = grams

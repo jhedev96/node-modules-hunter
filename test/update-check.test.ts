@@ -17,6 +17,22 @@ describe('update-check utils (unit)', () => {
     expect(isNewer('0.4.0', 'future-version-is-junk')).toBe(false)
   })
 
+  it('isNewer: prerelease-aware ties (v1.4 dist-tag compare)', () => {
+    // same triple: a release beats its own prereleases
+    expect(isNewer('1.4.0-beta.1', '1.4.0')).toBe(true)
+    expect(isNewer('1.4.0', '1.4.0-beta.1')).toBe(false)
+    // prerelease ordering inside the same triple
+    expect(isNewer('1.4.0-beta.1', '1.4.0-beta.2')).toBe(true)
+    expect(isNewer('1.4.0-beta.2', '1.4.0-beta.1')).toBe(false)
+    expect(isNewer('1.4.0-beta.1', '1.4.0-beta.1')).toBe(false)
+    // numeric identifiers sort below alphanumeric ones
+    expect(isNewer('1.4.0-1', '1.4.0-beta')).toBe(true)
+    // longer prerelease set wins when the shared prefix ties
+    expect(isNewer('1.4.0-beta.1', '1.4.0-beta.1.1')).toBe(true)
+    // build metadata never affects ordering
+    expect(isNewer('1.4.0', '1.4.0+build.5')).toBe(false)
+  })
+
   it('parseLatestVersion only accepts registry shapes with a version string', () => {
     expect(parseLatestVersion({ version: '0.5.0' })).toBe('0.5.0')
     expect(parseLatestVersion({ version: '0.5.0-beta.2' })).toBe('0.5.0-beta.2')
@@ -74,7 +90,7 @@ describe('update-check e2e (--update-check opt-in, 24h cache)', () => {
 
     const run = await runCli(['stats', '.', '--update-check'], { cwd: root, home: root })
     expect(run.code).toBe(0)
-    expect(run.stderr).toContain('update tersedia:')
+    expect(run.stderr).toContain('update available:')
     expect(run.stderr).toContain('→ 9.9.9')
     expect(run.stdout).toContain('OVERVIEW') // the stats output keeps flowing
 
@@ -90,7 +106,7 @@ describe('update-check e2e (--update-check opt-in, 24h cache)', () => {
     await seed(root, '0.0.1') // ancient — the tool is always "newer" → silent whatever the bump cycle
     const sameRun = await runCli(['stats', '.', '--update-check'], { cwd: root, home: root })
     expect(sameRun.code).toBe(0)
-    expect(sameRun.stderr).not.toContain('update tersedia')
+    expect(sameRun.stderr).not.toContain('update available')
 
     // stale cache (>24h) + refused connection → silent, exit code reflects the scan only
     await seed(root, '9.9.9', UPDATE_CACHE_TTL_MS + 60_000)
@@ -100,7 +116,7 @@ describe('update-check e2e (--update-check opt-in, 24h cache)', () => {
       envExtra: { NMH_REGISTRY_JSON: 'http://127.0.0.1:1/latest' },
     })
     expect(offlineRun.code).toBe(0)
-    expect(offlineRun.stderr).not.toContain('update tersedia')
+    expect(offlineRun.stderr).not.toContain('update available')
   }, 60_000)
 
   it('.nmhrc updateCheck: true opt-in works without the CLI flag', async () => {
@@ -111,7 +127,7 @@ describe('update-check e2e (--update-check opt-in, 24h cache)', () => {
 
     const run = await runCli(['stats', '.'], { cwd: root, home: root })
     expect(run.code).toBe(0)
-    expect(run.stderr).toContain('update tersedia:')
+    expect(run.stderr).toContain('update available:')
     expect(run.stderr).toContain('→ 9.9.9')
 
     // CLI flag absent + config absent → nothing runs (no note, no cache access crash)
@@ -119,6 +135,6 @@ describe('update-check e2e (--update-check opt-in, 24h cache)', () => {
     await content(bare)
     const noOpt = await runCli(['stats', '.'], { cwd: bare, home: bare })
     expect(noOpt.code).toBe(0)
-    expect(noOpt.stderr).not.toContain('update tersedia')
+    expect(noOpt.stderr).not.toContain('update available')
   }, 60_000)
 })

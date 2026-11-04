@@ -67,8 +67,8 @@ describe('nmh stats --reinstall (e2e)', () => {
       const run = await runCli(['stats', 'app', '--reinstall'], { cwd: root, home: root })
       expect(run.code).toBe(0)
       expect(run.stdout).toContain('REINSTALL')
-      expect(run.stdout).toContain('naif')
-      expect(run.stdout).toContain('pasang ulang semuanya sekali')
+      expect(run.stdout).toContain('naive')
+      expect(run.stdout).toContain('reinstall everything once')
       expect(run.stdout).toContain('1 native × 3 s')
       expect(run.stdout).toContain('pkg × 60 ms')
     } finally {

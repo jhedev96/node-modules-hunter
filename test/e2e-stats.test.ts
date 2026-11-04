@@ -88,7 +88,7 @@ describe('stats e2e (spawned CLI, non-TTY)', () => {
       const full = await runCli(['stats', fx.root])
       expect(full.code).toBe(0)
       expect(full.stdout).toContain('OVERVIEW')
-      expect(full.stdout).toContain('← dedup bisa hemat')
+      expect(full.stdout).toContain('← dedup could save')
 
       const focused = await runCli(['stats', fx.root, '--top', '1', '--by', 'package'])
       expect(focused.stdout).toContain('TOP 1 SIZE')

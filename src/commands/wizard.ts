@@ -9,9 +9,11 @@ import { runStats } from './stats.ts'
 import { partitionTargets, describeGuard } from '../core/guards.ts'
 import { scanForNodeModules } from '../core/walker.ts'
 import { renderScanResult } from '../core/render.ts'
-import { errorLog, log, warn, colors, isTTYOut, payload } from '../utils/logger.ts'
+import { errorLog, log, warn, colors, isTTYOut, payload, note } from '../utils/logger.ts'
 import { formatBytes } from '../utils/format.ts'
 import { renderFullBanner, renderCompactBanner } from '../utils/banner.ts'
+import { checkForUpdate } from '../utils/update-check.ts'
+import { runUpdate } from './update.ts'
 import { t } from '../i18n/index.ts'
 import type { DeleteMode, ScanEntry } from '../core/result.ts'
 import type { NmhConfig } from '../utils/config.ts'
@@ -155,6 +157,16 @@ async function runFallbackScan(cwd: string, options: WizardOptions): Promise<num
 async function runInteractiveWizard(cwd: string, options: WizardOptions): Promise<number> {
   const explicit = options.targets !== undefined && options.targets.length > 0
   if (options.banner !== false) log(renderFullBanner())
+  // v1.4 boot auto-check, ON by default: rc `updateCheck: false` opts out, an explicit
+  // `updateCheck: true` already printed the notice back in the cli dispatch. Non-blocking
+  // (fire-and-forget, 4 s timeout, 24 h cache) — the notice lands whenever the registry answers.
+  if (options.settings === undefined || options.settings.values.updateCheck === undefined) {
+    void checkForUpdate()
+      .then((notice) => {
+        if (notice !== null) note(notice)
+      })
+      .catch(() => {})
+  }
   const scope = explicit ? { root: cwd, from: cwd, climbed: false, scouted: false } : await resolveWizardScope(cwd)
   if (scope.climbed) {
     log(colors.dim(t('wizard.info.scopedUp', { root: scope.root })))
@@ -183,6 +195,7 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
         { value: 'search', label: t('wizard.menu.search') },
         { value: 'map', label: t('wizard.menu.map') },
         { value: 'stats', label: t('wizard.menu.stats') },
+        { value: 'update', label: t('wizard.menu.update') },
         { value: 'settings', label: t('wizard.menu.settings') },
         { value: 'quit', label: t('wizard.menu.quit') },
       ],
@@ -216,6 +229,13 @@ async function runInteractiveWizard(cwd: string, options: WizardOptions): Promis
       case 'stats':
         await runStats({ targets: wizardTargets(options), cwd: scope.root, maxDepth: WIZARD_DEPTH })
         break
+      case 'update': {
+        // v1.4: the plain update flow — facts, then the consent gate (TTY confirm).
+        // answer 'none' asks on the TTY; a downgrade confirm defaults to NO. Either
+        // outcome loops back to the menu instead of leaving the wizard.
+        await runUpdate({ json: false, mode: 'default', answer: 'none', force: false })
+        break
+      }
       case 'settings':
         log(renderSettings(options.settings, scope))
         break

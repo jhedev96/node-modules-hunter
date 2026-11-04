@@ -72,8 +72,9 @@ const GROUPS = (): HelpGroup[] => [
       { usage: '--size <mode>', desc: t('help.flag.size') },
       { usage: '--save-report <file>', desc: t('help.flag.saveReport') },
       { usage: '--wizard', desc: t('help.flag.wizard') },
-      { usage: 'update: --check · --info · -y · -n · -f', desc: t('help.flag.updateFamily') },
+      { usage: 'update: --check [tag] · --tag <name> · --info · -y · -n · -f', desc: t('help.flag.updateFamily') },
       { usage: '--update-check', desc: t('help.flag.updateCheck') },
+      { usage: '--tag <name>', desc: t('help.flag.tag') },
     ],
   },
   {
@@ -90,6 +91,7 @@ const GROUPS = (): HelpGroup[] => [
       { usage: '--no-color', desc: t('help.flag.noColor') },
       { usage: '--color', desc: t('help.flag.color') },
       { usage: '--language <lang>', desc: t('help.flag.language') },
+      { usage: '--update-tag <name>', desc: t('help.flag.updateTag') },
     ],
   },
   {

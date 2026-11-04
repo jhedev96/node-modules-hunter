@@ -39,7 +39,7 @@ describe('dedup suggestion e2e (lockfile-aware ranges, PRD §8.2)', () => {
       expect(zod.instances.map((inst) => inst.projectName).sort()).toEqual(['p', 'q'])
       expect(zod.instances.every((inst) => inst.declaredRange === '^3.23.0' && inst.declaredField === 'dependencies')).toBe(true)
       expect(zod.save).toBe(1033) // copies−1 × lower-median size (blob 1000 B + package.json bytes); q copy is larger → median = p's size
-      expect(zod.hint).toContain('identik')
+      expect(zod.hint).toContain('identical declared ranges')
 
       const text = await runCli(['stats', '.'], { cwd: root, home: root })
       expect(text.stdout).toContain('DEDUP SUGGESTION')
@@ -64,7 +64,7 @@ describe('dedup suggestion e2e (lockfile-aware ranges, PRD §8.2)', () => {
 
       const run = await runCli(['stats', '.', '--json'], { cwd: root, home: root })
       const suggestion = (JSON.parse(run.stdout) as SuggestionPayload).dedupSuggestions[0]!
-      expect(suggestion.hint).toContain('beda')
+      expect(suggestion.hint).toContain('declared ranges differ')
       expect(suggestion.hint).toContain('^1.0.0 vs ^1.2.0')
       expect(suggestion.instances.map((inst) => inst.projectName).sort()).toEqual(['p', 'q'])
       // the dev-only copy keeps its devDependencies attribution

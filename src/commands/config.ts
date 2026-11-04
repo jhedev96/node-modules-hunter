@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { homedir } from 'node:os'
-import { ConfigError, loadConfig, type NmhConfig } from '../utils/config.ts'
+import { ConfigError, isValidDistTag, loadConfig, type NmhConfig } from '../utils/config.ts'
 import { errorLog, log, payload, colors } from '../utils/logger.ts'
 import { expandTilde } from '../utils/paths.ts'
 import { t, isLocale } from '../i18n/index.ts'
@@ -25,10 +25,11 @@ export interface ConfigCommandRequest {
   color?: boolean | string | Array<boolean | string>
   updateCheck?: boolean | string | Array<boolean | string>
   language?: string | boolean | Array<string | boolean>
+  updateTag?: string | boolean | Array<string | boolean>
 }
 
 const VALID_MODES = new Set(['hard', 'soft', 'trash'])
-const KNOWN_KEYS = ['defaultMode', 'depth', 'exclude', 'keep', 'color', 'animate', 'updateCheck', 'logDir', 'language'] as const
+const KNOWN_KEYS = ['defaultMode', 'depth', 'exclude', 'keep', 'color', 'animate', 'updateCheck', 'logDir', 'language', 'updateTag'] as const
 type KnownKey = (typeof KNOWN_KEYS)[number]
 
 const KEY_TO_FLAG: Record<KnownKey, string> = {
@@ -41,6 +42,7 @@ const KEY_TO_FLAG: Record<KnownKey, string> = {
   updateCheck: 'update-check',
   logDir: 'log-dir',
   language: 'language',
+  updateTag: 'update-tag',
 }
 const LIST_KEYS: Record<'default-exclude' | 'default-keep', KnownKey> = {
   'default-exclude': 'exclude',
@@ -121,6 +123,14 @@ function parseLanguage(raw: unknown): string {
   return value.trim().toLowerCase()
 }
 
+function parseUpdateTag(raw: unknown): string {
+  const value = scalar(raw).value
+  if (typeof value !== 'string' || !isValidDistTag(value.trim())) {
+    throw new ConfigError(t('config.err.invalidUpdateTagValue', { value: JSON.stringify(value ?? null) }))
+  }
+  return value.trim()
+}
+
 function parseBool(raw: unknown, label: string): boolean {
   const given = flagBool(raw)
   if (given.value === null) {
@@ -173,6 +183,7 @@ function assemble(request: ConfigCommandRequest): Mutation {
     if (scalar(request.depth).given) mutation.scalars.depth = parseDepth(request.depth)
     if (scalar(request.defaultMode).given) mutation.scalars.defaultMode = parseMode(request.defaultMode)
     if (scalar(request.language).given) mutation.scalars.language = parseLanguage(request.language)
+    if (scalar(request.updateTag).given) mutation.scalars.updateTag = parseUpdateTag(request.updateTag)
     if (scalar(request.logDir).given) {
       const value = scalar(request.logDir).value
       if (typeof value !== 'string' || value.length === 0) throw new ConfigError(t('config.err.logDirNeedsValue'))
@@ -206,7 +217,7 @@ function assemble(request: ConfigCommandRequest): Mutation {
   // unset: the flags mark which keys to delete from the file (back to defaults)
   if (defaultExclude.given) mutation.unsetKeys.push('exclude')
   if (defaultKeep.given) mutation.unsetKeys.push('keep')
-  for (const key of ['defaultMode', 'logDir', 'depth', 'animate', 'color', 'updateCheck', 'language'] as const) {
+  for (const key of ['defaultMode', 'logDir', 'depth', 'animate', 'color', 'updateCheck', 'language', 'updateTag'] as const) {
     if (request[key] !== undefined) mutation.unsetKeys.push(key)
   }
   if (mutation.unsetKeys.length === 0) {
@@ -284,6 +295,7 @@ const INFO_DEFAULTS: Record<KnownKey, string> = {
   updateCheck: 'off',
   logDir: '~/.nmh',
   language: 'en',
+  updateTag: 'latest',
 }
 
 function renderInfo(source: string | null, values: Partial<NmhConfig>): string {

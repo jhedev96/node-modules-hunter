@@ -7,7 +7,7 @@ import { splitTargets, isRootPath } from './utils/paths.ts'
 import { versionDetail, renderVersionDetail } from './utils/version.ts'
 import { printHelp } from './utils/help.ts'
 import { detectFutureFlags } from './utils/future-flags.ts'
-import { loadConfig, ConfigError } from './utils/config.ts'
+import { loadConfig, ConfigError, isValidDistTag } from './utils/config.ts'
 import { setLogDirectory } from './utils/delete-log.ts'
 import { REPORT_EXTENSIONS } from './utils/report.ts'
 import { validateBaselineName } from './utils/baseline.ts'
@@ -80,13 +80,15 @@ cli.option('--reinstall', 'stats only: naive npm-ci-style estimate of the time t
 cli.option('--treemap [file]', 'treemap export: single-file HTML (vanilla JS, no deps); default nmh-treemap.html in cwd')
 cli.option('--out <file>', 'treemap only: where to write the HTML file (same as --treemap <file>)')
 cli.option('--update-check', 'opt-in: peek npm for a newer release (non-blocking, 24 h cache; also settable in .nmhrc)')
-cli.option('--check', 'update only: compare installed vs registry and exit — never installs')
+cli.option('--check [tag]', 'update only: compare installed vs registry dist-tag and exit — never installs (bare = latest/rc)')
+cli.option('--tag <name>', 'update only: read this npm dist-tag instead of latest (also --check <tag>)')
 cli.option('--info', 'update only: full registry detail (npm view style) — never installs')
 cli.option('-n, --no', 'update only: decline the update on the command line (nothing installs)')
 cli.option('--wizard', 'open the interactive wizard explicitly (same as the bare `nmh`); needs a TTY')
 cli.option('--default-exclude <globs>', 'config family: manage the persisted exclude list (comma list; special value "self")')
 cli.option('--default-keep <pkgs>', 'config family: manage the persisted keep list (comma list; special value "self")')
 cli.option('--default-mode <mode>', 'config family: set the persisted defaultMode (hard | soft | trash)')
+cli.option('--update-tag <name>', 'config family: set the persisted update dist-tag (updateTag)')
 cli.option('--log-dir <dir>', 'config family: set the persisted recovery-log directory (logDir)')
 cli.option('--language <lang>', 'UI language: en | id | zh | ru | es (also in .nmhrc / NMH_LANG; v1.3)')
 
@@ -521,6 +523,10 @@ async function runCli(userArgs: string[]): Promise<number> {
     errorLog(t('cli.err.infoOnlyUpdate'))
     return 1
   }
+  if (flags.tag !== undefined && subcommand !== 'update') {
+    errorLog(t('cli.err.tagOnlyUpdate'))
+    return 1
+  }
 
   // update (v1.1 explicit, v1.2 consented): --check/--info are read-only views; the plain
   // run shows facts and asks before installing (-y installs, -n declines, --force skips
@@ -530,15 +536,32 @@ async function runCli(userArgs: string[]): Promise<number> {
       errorLog(t('cli.err.updateArgs'))
       return 1
     }
-    if (flags.check === true && flags.info === true) {
+    if ((flags.check !== undefined && flags.check !== false) && flags.info === true) {
       errorLog(t('cli.err.checkInfoExclusive'))
       return 1
     }
+    // v1.4 tag inputs: --tag must carry a value, and every tag name must look like a
+    // dist-tag. --check <tag> is its own tag argument; bare --check reads --tag/rc/latest.
+    if (flags.tag === true) {
+      errorLog(t('cli.err.tagNeedsValue'))
+      return 1
+    }
+    const flagTag = typeof flags.tag === 'string' ? flags.tag.trim() : undefined
+    const checkTag = typeof flags.check === 'string' ? flags.check.trim() : undefined
+    for (const candidate of [flagTag, checkTag]) {
+      if (candidate !== undefined && !isValidDistTag(candidate)) {
+        errorLog(t('cli.err.invalidTag', { value: candidate }))
+        return 1
+      }
+    }
+    const checkGiven = flags.check !== undefined && flags.check !== false
+    const tag = flagTag ?? checkTag ?? config.updateTag ?? 'latest'
     return runUpdate({
       json,
-      mode: flags.check === true ? 'check' : flags.info === true ? 'info' : 'default',
+      mode: checkGiven ? 'check' : flags.info === true ? 'info' : 'default',
       answer: flags.yes === true ? 'yes' : flags.no === true ? 'no' : 'none',
       force: flags.force === true,
+      tag,
     })
   }
 
@@ -635,6 +658,7 @@ async function runCli(userArgs: string[]): Promise<number> {
       color: colorGiven ? (flags.color as ConfigCommandRequest['color']) : undefined,
       updateCheck: flags.updateCheck as ConfigCommandRequest['updateCheck'],
       language: flags.language as ConfigCommandRequest['language'],
+      updateTag: flags.updateTag as ConfigCommandRequest['updateTag'],
     })
   }
 
