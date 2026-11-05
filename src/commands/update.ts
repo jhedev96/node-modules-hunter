@@ -323,8 +323,13 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
     return 1
   }
 
+  // v1.5: the registry round-trips (view version + view --json + dist-tags, up to
+  // 60 s timeouts) get a rotating loader — same auto-mute contract as every other
+  // spin (off in --json/quiet/non-TTY), so piped runs stay pipeable.
+  spinUpdate(t('update.spin.registry'))
   const manifest = await latestManifest()
   if (manifest === null) {
+    spinClear()
     const message = t('update.err.noRegistry')
     if (request.json) errorLog(message)
     else errorLog(`⚠ ${message}`)
@@ -336,6 +341,7 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
   // seam is a registry failure, not a silent fallback to latest.
   const hermetic = typeof process.env.NMH_UPDATE_LATEST_JSON === 'string' && process.env.NMH_UPDATE_LATEST_JSON.length > 0
   const distTags = await distTagsMap(!hermetic)
+  spinClear()
   let target: string
   if (tag === 'latest') {
     target = distTags?.latest ?? manifest.version
@@ -355,7 +361,9 @@ export async function runUpdate(request: UpdateRequest): Promise<number> {
   }
 
   const latest = manifest.version
+  spinUpdate(t('update.spin.global'))
   const global = await isNpmGlobal()
+  spinClear()
   const method: UpdateResult['method'] = global ? 'npm-global' : 'manual'
   const direction: UpdateDirection = isNewer(current, target) ? 'upgrade' : isNewer(target, current) ? 'downgrade' : 'current'
   const updateAvailable = direction === 'upgrade'

@@ -223,6 +223,8 @@ const en: Record<string, string> = {
 
   // ── commands/update.ts ──────────────────────────────────────────────────
   'update.spin': 'updating via npm…',
+  'update.spin.registry': 'checking the npm registry…',
+  'update.spin.global': 'checking the global install…',
   'update.err.npmExit': 'npm exited {code}',
   'update.info.title': 'nmh update — info registry (npm view node-modules-hunter)',
   'update.info.installed': 'installed   {value}',
@@ -298,6 +300,7 @@ const en: Record<string, string> = {
 
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': 'analyzing {done}/{total} node_modules…',
+  'stats.spin.registry': 'asking the npm registry about {count} packages…',
   'stats.hint.noDeclared': 'copies resolve through their own parents — no direct knob at the project level',
   'stats.hint.tail': ' (declared {range})',
   'stats.hint.pnpm': 'identical declared ranges — the pnpm virtual store folds hoisted copies; one version at the workspace root is enough{tail}',

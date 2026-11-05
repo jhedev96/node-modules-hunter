@@ -222,6 +222,8 @@ const es: Record<string, string> = {
 
   // ── commands/update.ts ──────────────────────────────────────────────────
   'update.spin': 'actualizando vía npm…',
+  'update.spin.registry': 'consultando el registro npm…',
+  'update.spin.global': 'comprobando la instalación global…',
   'update.err.npmExit': 'npm terminó con el código {code}',
   'update.info.title': 'nmh update — info del registro (npm view node-modules-hunter)',
   'update.info.installed': 'instalado   {value}',
@@ -297,6 +299,7 @@ const es: Record<string, string> = {
 
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': 'analizando {done}/{total} node_modules…',
+  'stats.spin.registry': 'consultando {count} paquetes en el registro npm…',
   'stats.hint.noDeclared': 'las copias siguen la resolución de cada padre — no hay control directo a nivel de proyecto',
   'stats.hint.tail': ' (declarado {range})',
   'stats.hint.pnpm': 'rango declarado idéntico — el virtual store de pnpm colapsa las copias hoisted; basta una versión en la raíz del workspace{tail}',

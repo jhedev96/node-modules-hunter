@@ -223,6 +223,8 @@ const ru: Record<string, string> = {
   'wizard.settings.commandsHint': 'всё это меню существует и как обычные команды: nmh clean · nmh search <pattern> · nmh map · nmh stats',
   // ── commands/update.ts ──────────────────────────────────────────────────
   'update.spin': 'обновление через npm…',
+  'update.spin.registry': 'проверка реестра npm…',
+  'update.spin.global': 'проверка глобальной установки…',
   'update.err.npmExit': 'npm завершился с кодом {code}',
   'update.info.title': 'nmh update — сведения из registry (npm view node-modules-hunter)',
   'update.info.installed': 'установлена   {value}',
@@ -297,6 +299,7 @@ const ru: Record<string, string> = {
 
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': 'анализ {done}/{total} node_modules…',
+  'stats.spin.registry': 'запрос в реестр npm о {count} пакетах…',
   'stats.hint.noDeclared': 'копии резолвятся к своим родителям — прямого рычага на уровне проекта нет',
   'stats.hint.tail': ' (заявлено {range})',
   'stats.hint.pnpm': 'заявленные диапазоны одинаковы — виртуальное хранилище pnpm схлопывает поднятые копии; в корне workspace достаточно одной версии{tail}',

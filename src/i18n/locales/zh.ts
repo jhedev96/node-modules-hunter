@@ -223,6 +223,8 @@ const zh: Record<string, string> = {
   'wizard.settings.commandsHint': '整个菜单也都有对应的普通命令：nmh clean · nmh search <pattern> · nmh map · nmh stats',
   // ── commands/update.ts ──────────────────────────────────────────────────
   'update.spin': '正在通过 npm 更新…',
+  'update.spin.registry': '正在查询 npm 仓库…',
+  'update.spin.global': '正在检查全局安装…',
   'update.err.npmExit': 'npm 退出码 {code}',
   'update.info.title': 'nmh update — registry 信息（npm view node-modules-hunter）',
   'update.info.installed': '已安装    {value}',
@@ -297,6 +299,7 @@ const zh: Record<string, string> = {
 
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': '正在分析 {done}/{total} 个 node_modules…',
+  'stats.spin.registry': '正在向 npm 仓库查询 {count} 个包…',
   'stats.hint.noDeclared': '副本的解析跟随各自的父级 — 项目层没有直接的控制开关',
   'stats.hint.tail': '（声明 {range}）',
   'stats.hint.pnpm': '声明的范围相同 — pnpm 虚拟存储会折叠提升的副本；workspace 根只需一个版本{tail}',

@@ -222,6 +222,8 @@ const id: Record<string, string> = {
 
   // ── commands/update.ts ──────────────────────────────────────────────────
   'update.spin': 'update via npm…',
+  'update.spin.registry': 'memeriksa registry npm…',
+  'update.spin.global': 'memeriksa instalasi global…',
   'update.err.npmExit': 'npm keluar dengan kode {code}',
   'update.info.title': 'nmh update — info registry (npm view node-modules-hunter)',
   'update.info.installed': 'terinstall  {value}',
@@ -297,6 +299,7 @@ const id: Record<string, string> = {
 
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': 'menganalisa {done}/{total} node_modules…',
+  'stats.spin.registry': 'menanyakan {count} paket ke registry npm…',
   'stats.hint.noDeclared': 'copies resolusinya ikut parent masing-masing — tidak ada knob langsung di project level',
   'stats.hint.tail': ' (declared {range})',
   'stats.hint.pnpm': 'range declared identik — pnpm virtual store melipat copy hoisted; cukup satu versi di workspace root{tail}',

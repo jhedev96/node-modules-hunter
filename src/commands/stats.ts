@@ -411,6 +411,9 @@ async function collectDeprecations(
       if (unique.size >= MAX_REGISTRY_DEPRECATED_FETCHES) break
     }
     const fetchLimiter = createLimiter(6)
+    // v1.5: this fill runs after the measuring spin cleared — up to 25 capped
+    // lookups (4 s timeout each) deserve their own loader line, same mute contract.
+    spinUpdate(t('stats.spin.registry', { count: unique.size }))
     await Promise.all(
       [...unique.values()].map((hit) =>
         fetchLimiter(async () => {
@@ -432,6 +435,7 @@ async function collectDeprecations(
         }),
       ),
     )
+    spinClear()
   }
   return { count: refs.length, refs, truncated: overflowed, online: true }
 }
