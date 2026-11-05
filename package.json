@@ -1,6 +1,6 @@
 {
   "name": "node-modules-hunter",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Hunt down bloated node_modules folders across your machine — scan, measure, and clean them with one command.",
   "type": "module",
   "license": "MIT",
