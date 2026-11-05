@@ -19,6 +19,7 @@ function overview(partial: Partial<StatsOverview>): StatsOverview {
     instances: 1,
     unique: 1,
     dupFactor: 1,
+    symlinked: 0,
     waste: 0,
     wastePercent: 0,
     declared: null,

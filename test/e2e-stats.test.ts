@@ -13,11 +13,12 @@ interface StatsPayload {
     instances: number
     unique: number
     dupFactor: number
+    symlinked: number
     waste: number
     wastePercent: number
     declared: number | null
   }
-  sizeGroups: Array<{ name: string; copies: number; totalSize: number; dedupableSize?: number }>
+  sizeGroups: Array<{ name: string; copies: number; symlinkedCopies: number; totalSize: number; dedupableSize?: number }>
   projects: Array<{
     path: string
     nested: boolean
@@ -156,6 +157,31 @@ describe('stats e2e (spawned CLI, non-TTY)', () => {
       const linkedPkg = web?.topPackages.find((pkg) => pkg.name === 'linked')
       expect(linkedPkg?.symlinked).toBe(true)
       expect(linkedPkg?.size).toBeNull()
+    } finally {
+      await fs.rm(fx.root, { recursive: true, force: true })
+    }
+  })
+
+  it('symlinked store links never count as copies — dup math stays size-backed (v1.5)', async () => {
+    const fx = await dupFixture('stats-symlink-dup')
+    try {
+      const before = await statsJson(['stats', fx.root])
+
+      // a third project whose "lodash" is a symlink into web's copy (pnpm-store style)
+      const link = path.join(fx.root, 'linked', 'node_modules', 'lodash')
+      await fs.mkdir(path.dirname(link), { recursive: true })
+      await fs.writeFile(path.join(fx.root, 'linked', 'package.json'), '{"name":"linked","version":"1.0.0"}')
+      await fs.symlink(path.join(fx.web, 'lodash'), link, 'dir')
+
+      const after = await statsJson(['stats', fx.root])
+      expect(after.payload.overview.symlinked).toBe(1)
+      // the link must not inflate instances/unique/dupFactor — only the new counter moves
+      expect(after.payload.overview.instances).toBe(before.payload.overview.instances)
+      expect(after.payload.overview.unique).toBe(before.payload.overview.unique)
+      expect(after.payload.overview.dupFactor).toBe(before.payload.overview.dupFactor)
+      const lodash = after.payload.sizeGroups.find((group) => group.name === 'lodash')
+      expect(lodash?.copies).toBe(2)
+      expect(lodash?.symlinkedCopies).toBe(1)
     } finally {
       await fs.rm(fx.root, { recursive: true, force: true })
     }

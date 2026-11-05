@@ -99,8 +99,10 @@ export interface MapOutcome {
 export interface StatsPackageGroup {
   /** Package name (scope included, `@foo/bar`). */
   name: string
-  /** Number of install instances found (copies across all scanned entries). */
+  /** Number of real install instances found (copies across all scanned entries). */
   copies: number
+  /** v1.5: symlinked instances (pnpm-store style links) — counted apart, never as copies. */
+  symlinkedCopies: number
   /** Sum of instance sizes, bytes. */
   totalSize: number
   /** Only meaningful when copies > 1: bytes recoverable by deduplicating identical versions. */
@@ -110,12 +112,15 @@ export interface StatsPackageGroup {
 export interface StatsOverview {
   /** Total size of scanned node_modules (top-level only — matches `--size total`). */  totalSize: number
   entryCount: number
-  /** Installed package instances (= top-level dirs across entries, nested included when scanned). */
+  /** Installed package instances (= top-level dirs across entries, nested included when scanned).
+   * v1.5: symlinked store links are NOT copies — they are counted in `symlinked` instead. */
   instances: number
   /** Distinct name@version pairs. */
   unique: number
   /** instances / unique, rounded to 1 decimal. */
   dupFactor: number
+  /** v1.5 (additive key): symlinked instances seen (shared store links — sizeless, never dup copies). */
+  symlinked: number
   /** Bytes recoverable by deduplicating identical versions. */
   waste: number
   /** waste / totalSize of packages, % rounded to 1 decimal. */

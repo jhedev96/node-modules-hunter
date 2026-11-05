@@ -20,7 +20,7 @@ interface ReinstallPayload {
 
 describe('reinstall estimate (unit math + naive native proxy)', () => {
   it('seconds = pkg×60ms + bytes/50MBs + native×3s, deterministic', () => {
-    const overview = { totalSize: 100 * 1024 * 1024, entryCount: 1, instances: 300, unique: 300, dupFactor: 1, waste: 0, wastePercent: 0, declared: 3 } as const
+    const overview = { totalSize: 100 * 1024 * 1024, entryCount: 1, instances: 300, unique: 300, dupFactor: 1, symlinked: 0, waste: 0, wastePercent: 0, declared: 3 } as const
     const estimate = buildReinstall(overview, ['typescript', 'sharp', '@img/sharp-linux-x64', 'grpc-tools'])
     // 300×60ms + 100MB/50MBs + 3 native families (sharp, sharp-linux-x64 counts 1 distinct name? names distinct: sharp + @img/sharp-linux-x64 = 2 native? 'grpc-tools' too → 3)
     expect(estimate.packages).toBe(300)

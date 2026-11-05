@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { checkDeleteTarget } from '../src/core/guards.ts'
+import { checkDeleteTarget, isSystemNodeModules } from '../src/core/guards.ts'
 import { tmpRoot } from './helpers.ts'
 
 describe('checkDeleteTarget (PRD §6 hard guards)', () => {
@@ -56,6 +56,33 @@ describe('checkDeleteTarget (PRD §6 hard guards)', () => {
   it('flags a missing target as not-found (not a crash)', async () => {
     const verdict = await checkDeleteTarget(path.join(await tmpRoot('guard-missing'), 'node_modules'))
     expect(verdict.code).toBe('not-found')
+    expect(verdict.safe).toBe(false)
+  })
+})
+
+describe('isSystemNodeModules (v1.5 system global trees)', () => {
+  it('protects the OS/package-manager global trees and everything inside them', () => {
+    expect(isSystemNodeModules('/usr/lib/node_modules')).toBe(true)
+    expect(isSystemNodeModules('/usr/lib/node_modules/npm')).toBe(true)
+    expect(isSystemNodeModules('/usr/local/lib/node_modules')).toBe(true)
+    expect(isSystemNodeModules('/lib/node_modules/corepack')).toBe(true)
+    expect(isSystemNodeModules('/opt/homebrew/lib/node_modules/typescript')).toBe(true)
+  })
+
+  it('leaves user space and near-miss prefixes alone', () => {
+    expect(isSystemNodeModules('/home/x/project/node_modules')).toBe(false)
+    expect(isSystemNodeModules('/usr/lib/node_modules-twin')).toBe(false)
+    expect(isSystemNodeModules('/usr/share/node_modules')).toBe(false)
+    expect(isSystemNodeModules('/usr/local/lib/node_modulesx')).toBe(false)
+  })
+
+  it('blocks a system global tree through the delete guard (when it exists here)', async () => {
+    const exists = await fs
+      .lstat('/usr/lib/node_modules')
+      .then(() => true, () => false)
+    if (!exists) return // environment-dependent — the predicate tests above carry the rule
+    const verdict = await checkDeleteTarget('/usr/lib/node_modules')
+    expect(verdict.code).toBe('system')
     expect(verdict.safe).toBe(false)
   })
 })

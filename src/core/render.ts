@@ -506,6 +506,9 @@ export function renderStatsReport(outcome: StatsOutcome, options: RenderStatsOpt
   lines.push(
     t('render.stats.packages', { instances: overview.instances, unique: overview.unique, dup: overview.dupFactor }),
   )
+  if (overview.symlinked > 0) {
+    lines.push(colors.dim(t('render.stats.symlinkedNote', { count: overview.symlinked })))
+  }
   if (overview.declared !== null) {
     lines.push(t('render.stats.directDeps', { count: overview.declared }))
   }

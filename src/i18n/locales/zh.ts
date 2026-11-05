@@ -179,6 +179,8 @@ const zh: Record<string, string> = {
   'guard.reason.home': '拒绝：目标是用户主目录',
   'guard.reason.rootParent': '拒绝：node_modules 直接位于文件系统根目录下',
   'guard.reason.homeParent': '拒绝：node_modules 直接位于主目录下',
+  'guard.reason.system': '拒绝：系统所有的 npm 全局目录（由操作系统或版本管理器管理）',
+  'render.stats.symlinkedNote': '另有 {count} 个 store 符号链接 — 共享、无大小、不计为副本',
   'guard.reason.unsafe': '不安全的目标',
   // ── commands/wizard.ts ──────────────────────────────────────────────────
   'wizard.warn.climbed': 'cwd 的 3 层内没有 node_modules — 已收窄到上面的项目根：{root}',

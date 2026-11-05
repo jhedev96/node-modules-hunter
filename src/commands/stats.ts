@@ -142,8 +142,12 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
       declaredSum += project.declared.dependencies.length + project.declared.devDependencies.length
     }
     for (const pkg of project.topPackages) {
-      const group = byName.get(pkg.name) ?? { name: pkg.name, copies: 0, totalSize: 0 }
-      group.copies += 1
+      // v1.5 hardening: a symlinked instance (pnpm store link) is a SHARED package,
+      // not a copy — counting it in `copies` inflated dupFactor while contributing
+      // zero size. Links get their own counter; dup math stays size-backed.
+      const group = byName.get(pkg.name) ?? { name: pkg.name, copies: 0, symlinkedCopies: 0, totalSize: 0 }
+      if (pkg.symlinked) group.symlinkedCopies += 1
+      else group.copies += 1
       if (pkg.size != null) {
         group.totalSize += pkg.size
         pkgSizeTotal += pkg.size
@@ -203,6 +207,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
     : null
 
   const instances = sizeGroups.reduce((sum, group) => sum + group.copies, 0)
+  const symlinkedTotal = sizeGroups.reduce((sum, group) => sum + group.symlinkedCopies, 0)
   let unique = 0
   for (const versions of versionsByName.values()) unique += versions.size
   const waste = sizeGroups.reduce((sum, group) => sum + (group.dedupableSize ?? 0), 0)
@@ -213,6 +218,7 @@ export async function collectStats(request: StatsRequest): Promise<StatsOutcome>
     instances,
     unique,
     dupFactor: unique > 0 ? round1(instances / unique) : 0,
+    symlinked: symlinkedTotal,
     waste,
     wastePercent: pkgSizeTotal > 0 ? round1((waste / pkgSizeTotal) * 100) : 0,
     declared: projectsWithManifest > 0 ? declaredSum : null,

@@ -176,6 +176,8 @@ const es: Record<string, string> = {
   'guard.reason.home': 'rechazo: el objetivo es el directorio home del usuario',
   'guard.reason.rootParent': 'rechazo: node_modules justo dentro de la raíz del sistema de archivos',
   'guard.reason.homeParent': 'rechazo: node_modules justo dentro del directorio home',
+  'guard.reason.system': 'rechazo: árbol npm global del sistema (gestionado por el SO o un version manager)',
+  'render.stats.symlinkedNote': 'más {count} enlace(s) simbólico(s) al store — compartido(s), sin tamaño, no cuenta(n) como copias',
   'guard.reason.unsafe': 'objetivo inseguro',
 
   // ── commands/wizard.ts ──────────────────────────────────────────────────

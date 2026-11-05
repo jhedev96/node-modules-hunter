@@ -176,6 +176,8 @@ const id: Record<string, string> = {
   'guard.reason.home': 'menolak: target adalah home direktori pengguna',
   'guard.reason.rootParent': 'menolak: node_modules tepat di dalam root filesystem',
   'guard.reason.homeParent': 'menolak: node_modules tepat di dalam home direktori',
+  'guard.reason.system': 'menolak: pohon npm global milik sistem (dikelola OS atau version manager)',
+  'render.stats.symlinkedNote': 'plus {count} tautan symlink store — dibagi bersama, tanpa size, tak dihitung sebagai salinan',
   'guard.reason.unsafe': 'target tidak aman',
 
   // ── commands/wizard.ts ──────────────────────────────────────────────────

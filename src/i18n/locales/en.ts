@@ -177,6 +177,7 @@ const en: Record<string, string> = {
   'guard.reason.home': 'refusing: target is the user home directory',
   'guard.reason.rootParent': 'refusing: node_modules directly inside the filesystem root',
   'guard.reason.homeParent': 'refusing: node_modules directly inside the home directory',
+  'guard.reason.system': 'refusing: system npm global tree (managed by the OS or a version manager)',
   'guard.reason.unsafe': 'unsafe target',
 
   // ── commands/wizard.ts ──────────────────────────────────────────────────
@@ -301,6 +302,7 @@ const en: Record<string, string> = {
   // ── commands/stats.ts ───────────────────────────────────────────────────
   'stats.spin.progress': 'analyzing {done}/{total} node_modules…',
   'stats.spin.registry': 'asking the npm registry about {count} packages…',
+  'render.stats.symlinkedNote': 'plus {count} symlinked store link(s) — shared, sizeless, not counted as copies',
   'stats.hint.noDeclared': 'copies resolve through their own parents — no direct knob at the project level',
   'stats.hint.tail': ' (declared {range})',
   'stats.hint.pnpm': 'identical declared ranges — the pnpm virtual store folds hoisted copies; one version at the workspace root is enough{tail}',

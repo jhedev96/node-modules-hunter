@@ -179,6 +179,8 @@ const ru: Record<string, string> = {
   'guard.reason.home': 'отказ: цель — домашний каталог пользователя',
   'guard.reason.rootParent': 'отказ: node_modules прямо в корне файловой системы',
   'guard.reason.homeParent': 'отказ: node_modules прямо в домашнем каталоге',
+  'guard.reason.system': 'отказ: системное глобальное дерево npm (управляется ОС или менеджером версий)',
+  'render.stats.symlinkedNote': 'плюс {count} симлинк(ов) на store — общие, без размера, не считаются копиями',
   'guard.reason.unsafe': 'небезопасная цель',
   // ── commands/wizard.ts ──────────────────────────────────────────────────
   'wizard.warn.climbed': 'в 3 уровнях от cwd нет node_modules — сужено до корня проекта выше: {root}',
